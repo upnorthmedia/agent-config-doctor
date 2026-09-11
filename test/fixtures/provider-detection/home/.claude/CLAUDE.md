@@ -1,0 +1,1 @@
+# Unsupported Claude fixture

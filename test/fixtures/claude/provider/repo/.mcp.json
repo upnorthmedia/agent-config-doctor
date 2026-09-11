@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "fixture-project-mcp": {
+      "type": "http",
+      "url": "https://fixture-user:fixture-password@example.test/mcp?token=fixture-sensitive-query",
+      "headers": {
+        "Authorization": "fixture-sensitive-header"
+      }
+    }
+  }
+}

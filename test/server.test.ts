@@ -1,0 +1,392 @@
+import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import {
+  mkdir,
+  mkdtemp,
+  rm,
+  symlink,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { test, type TestContext } from "node:test";
+import { fileURLToPath } from "node:url";
+
+import { scanProviders } from "../src/core/coordinator.ts";
+import type { ScanContext } from "../src/core/provider-adapter.ts";
+import { CodexAdapter } from "../src/providers/codex.ts";
+import type {
+  SpawnedProcess,
+  SpawnProcess,
+} from "../src/server/actions.ts";
+import { startDashboardServer } from "../src/server/server.ts";
+
+const fixtureRoot = fileURLToPath(
+  new URL("./fixtures/codex/instruction-chain", import.meta.url),
+);
+
+async function createScanFixture(
+  t: TestContext,
+  options: { symlinked?: boolean } = {},
+) {
+  const repositoryPath = await mkdtemp(path.join(os.tmpdir(), "agent-config-server-"));
+  const outsideRoot = await mkdtemp(path.join(os.tmpdir(), "agent-config-server-outside-"));
+  const instructionPath = path.join(repositoryPath, "AGENTS.md");
+  const originalTarget = path.join(repositoryPath, "original.md");
+  if (options.symlinked) {
+    await writeFile(originalTarget, "# Original\n", "utf8");
+    await symlink(originalTarget, instructionPath);
+  } else {
+    await writeFile(instructionPath, "# Original\n", "utf8");
+  }
+  t.after(async () => {
+    await rm(repositoryPath, { recursive: true, force: true });
+    await rm(outsideRoot, { recursive: true, force: true });
+  });
+
+  const homeDirectory = path.join(fixtureRoot, "home");
+  const context: ScanContext = {
+    homeDirectory,
+    repositoryPath,
+    workingDirectory: repositoryPath,
+    environment: { CODEX_HOME: path.join(homeDirectory, ".codex") },
+    executables: { codex: path.join(fixtureRoot, "bin", "codex") },
+  };
+  const scan = await scanProviders([new CodexAdapter()], context);
+  const resourceId = scan.report.resources.find(
+    (resource) => resource.displayPath === "$REPO/AGENTS.md",
+  )?.id;
+  assert.ok(resourceId);
+  return { instructionPath, outsideRoot, resourceId, scan };
+}
+
+function headers(server: Awaited<ReturnType<typeof startDashboardServer>>) {
+  return {
+    Authorization: `Bearer ${server.credential}`,
+    "Content-Type": "application/json",
+    Origin: server.origin,
+  };
+}
+
+function successfulProcess(): SpawnedProcess {
+  const child = new EventEmitter() as EventEmitter & SpawnedProcess;
+  child.unref = () => {};
+  queueMicrotask(() => child.emit("spawn"));
+  return child;
+}
+
+test("protects local data with a per-process credential and restrictive headers", async (t) => {
+  const { scan } = await createScanFixture(t);
+  const first = await startDashboardServer({ initialScan: scan, port: 0 });
+  const second = await startDashboardServer({ initialScan: scan, port: 0 });
+  t.after(() => first.close());
+  t.after(() => second.close());
+
+  assert.equal(first.host, "127.0.0.1");
+  assert.notEqual(first.port, 0);
+  assert.notEqual(first.credential, second.credential);
+  assert.match(first.credential, /^[A-Za-z0-9_-]{40,}$/);
+
+  const page = await fetch(first.origin);
+  assert.equal(page.status, 200);
+  assert.match(page.headers.get("content-security-policy") ?? "", /default-src 'none'/);
+  assert.match(page.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
+  assert.equal(page.headers.has("access-control-allow-origin"), false);
+  const pageBody = await page.text();
+  assert.equal(pageBody.includes(first.credential), false);
+  assert.match(pageBody, /Installed inventory/);
+
+  const stylesheet = await fetch(`${first.origin}/assets/dashboard.css`);
+  const clientScript = await fetch(`${first.origin}/assets/dashboard.js`);
+  assert.equal(stylesheet.status, 200);
+  assert.equal(clientScript.status, 200);
+  assert.match(stylesheet.headers.get("content-type") ?? "", /^text\/css/);
+  assert.match(clientScript.headers.get("content-type") ?? "", /^text\/javascript/);
+  const favicon = await fetch(`${first.origin}/favicon.ico`);
+  assert.equal(favicon.status, 204);
+
+  const rejected = await fetch(`${first.origin}/api/scan`);
+  assert.equal(rejected.status, 401);
+  const accepted = await fetch(`${first.origin}/api/scan`, {
+    headers: { Authorization: `Bearer ${first.credential}` },
+  });
+  assert.equal(accepted.status, 200);
+  assert.equal(accepted.headers.has("access-control-allow-origin"), false);
+  const body = await accepted.text();
+  assert.equal(body.includes(fixtureRoot), false);
+  assert.equal(body.includes("fixture-sensitive"), false);
+
+  const optionResponse = await fetch(`${first.origin}/api/options`, {
+    headers: { Authorization: `Bearer ${first.credential}` },
+  });
+  assert.equal(optionResponse.status, 200);
+  const optionBody = await optionResponse.text();
+  assert.equal(optionBody.includes(fixtureRoot), false);
+  assert.equal(optionBody.includes("executablePath"), false);
+  const publicOptions = JSON.parse(optionBody) as { scannedAt: string };
+  assert.equal(Number.isNaN(Date.parse(publicOptions.scannedAt)), false);
+});
+
+test("rescans an allowed working directory through its opaque session ID", async (t) => {
+  const homeDirectory = path.join(fixtureRoot, "home");
+  const repositoryPath = path.join(fixtureRoot, "repo");
+  const baseContext: ScanContext = {
+    homeDirectory,
+    repositoryPath,
+    workingDirectory: repositoryPath,
+    environment: { CODEX_HOME: path.join(homeDirectory, ".codex") },
+    executables: { codex: path.join(fixtureRoot, "bin", "codex") },
+  };
+  const initialScan = await scanProviders([new CodexAdapter()], baseContext);
+  const server = await startDashboardServer({
+    initialScan,
+    port: 0,
+    scanWorkingDirectory: (workingDirectory) =>
+      scanProviders([new CodexAdapter()], { ...baseContext, workingDirectory }),
+  });
+  t.after(() => server.close());
+  const authorization = { Authorization: `Bearer ${server.credential}` };
+  const initial = await (
+    await fetch(`${server.origin}/api/scan`, { headers: authorization })
+  ).json() as {
+    effective: { codex: { orderedResourceIds: string[] } };
+  };
+  const scanOptions = await (
+    await fetch(`${server.origin}/api/options`, { headers: authorization })
+  ).json() as {
+    workingDirectories: Array<{ id: string; displayPath: string }>;
+  };
+  const nested = scanOptions.workingDirectories.find(
+    (candidate) => candidate.displayPath === "$REPO/packages/api",
+  );
+  assert.ok(nested);
+  assert.equal(nested.id.includes("packages/api"), false);
+
+  const getSelection = await fetch(
+    `${server.origin}/api/scan?cwd=${encodeURIComponent(nested.id)}`,
+    { headers: authorization },
+  );
+  assert.equal(getSelection.status, 400);
+
+  const invalidOrigin = await fetch(
+    `${server.origin}/api/actions/select-working-directory`,
+    {
+      method: "POST",
+      headers: { ...headers(server), Origin: "http://evil.example" },
+      body: JSON.stringify({ workingDirectoryId: nested.id }),
+    },
+  );
+  assert.equal(invalidOrigin.status, 403);
+
+  const arbitraryPath = await fetch(
+    `${server.origin}/api/actions/select-working-directory`,
+    {
+      method: "POST",
+      headers: headers(server),
+      body: JSON.stringify({ workingDirectoryId: nested.id, path: "/etc" }),
+    },
+  );
+  assert.equal(arbitraryPath.status, 400);
+
+  const response = await fetch(
+    `${server.origin}/api/actions/select-working-directory`,
+    {
+      method: "POST",
+      headers: headers(server),
+      body: JSON.stringify({ workingDirectoryId: nested.id }),
+    },
+  );
+  assert.equal(response.status, 200);
+  const changed = await response.json() as {
+    report: {
+      subject: { workingDirectory: string };
+      effective: { codex: { orderedResourceIds: string[] } };
+    };
+    options: { selectedWorkingDirectoryId: string };
+  };
+  assert.equal(changed.report.subject.workingDirectory, "$REPO/packages/api");
+  assert.notDeepEqual(
+    changed.report.effective.codex.orderedResourceIds,
+    initial.effective.codex.orderedResourceIds,
+  );
+  assert.equal(changed.options.selectedWorkingDirectoryId, nested.id);
+
+  const forged = await fetch(
+    `${server.origin}/api/actions/select-working-directory`,
+    {
+      method: "POST",
+      headers: headers(server),
+      body: JSON.stringify({ workingDirectoryId: "forged-cwd-id" }),
+    },
+  );
+  assert.equal(forged.status, 400);
+});
+
+test("rejects a working directory redirected outside the repository", async (t) => {
+  const repositoryPath = await mkdtemp(
+    path.join(os.tmpdir(), "agent-config-cwd-root-"),
+  );
+  const outsideRoot = await mkdtemp(
+    path.join(os.tmpdir(), "agent-config-cwd-outside-"),
+  );
+  const nestedPath = path.join(repositoryPath, "packages", "api");
+  await mkdir(nestedPath, { recursive: true });
+  await writeFile(path.join(repositoryPath, "AGENTS.md"), "# Root\n", "utf8");
+  await writeFile(path.join(nestedPath, "AGENTS.md"), "# Nested\n", "utf8");
+  t.after(async () => {
+    await rm(repositoryPath, { recursive: true, force: true });
+    await rm(outsideRoot, { recursive: true, force: true });
+  });
+
+  const homeDirectory = path.join(fixtureRoot, "home");
+  const baseContext: ScanContext = {
+    homeDirectory,
+    repositoryPath,
+    workingDirectory: repositoryPath,
+    environment: { CODEX_HOME: path.join(homeDirectory, ".codex") },
+    executables: { codex: path.join(fixtureRoot, "bin", "codex") },
+  };
+  const initialScan = await scanProviders([new CodexAdapter()], baseContext);
+  let scannedPath: string | undefined;
+  const server = await startDashboardServer({
+    initialScan,
+    port: 0,
+    scanWorkingDirectory: async (workingDirectory) => {
+      scannedPath = workingDirectory;
+      return scanProviders([new CodexAdapter()], {
+        ...baseContext,
+        workingDirectory,
+      });
+    },
+  });
+  t.after(() => server.close());
+  const options = await (
+    await fetch(`${server.origin}/api/options`, {
+      headers: { Authorization: `Bearer ${server.credential}` },
+    })
+  ).json() as {
+    workingDirectories: Array<{ id: string; displayPath: string }>;
+  };
+  const nested = options.workingDirectories.find(
+    (candidate) => candidate.displayPath === "$REPO/packages/api",
+  );
+  assert.ok(nested);
+
+  await rm(nestedPath, { recursive: true });
+  await symlink(outsideRoot, nestedPath, "dir");
+  const response = await fetch(
+    `${server.origin}/api/actions/select-working-directory`,
+    {
+      method: "POST",
+      headers: headers(server),
+      body: JSON.stringify({ workingDirectoryId: nested.id }),
+    },
+  );
+
+  assert.equal(response.status, 409);
+  assert.equal(scannedPath, undefined);
+});
+
+test("rejects invalid origins, arbitrary paths, and forged resource IDs over HTTP", async (t) => {
+  const { resourceId, scan } = await createScanFixture(t);
+  const calls: Array<{ command: string; args: readonly string[] }> = [];
+  const spawnProcess: SpawnProcess = (command, args) => {
+    calls.push({ command, args });
+    return successfulProcess();
+  };
+  const server = await startDashboardServer({
+    initialScan: scan,
+    port: 0,
+    editor: {
+      id: "code",
+      label: "Visual Studio Code",
+      executablePath: "/usr/local/bin/code",
+    },
+    spawnProcess,
+  });
+  t.after(() => server.close());
+
+  const invalidOrigin = await fetch(`${server.origin}/api/actions/open`, {
+    method: "POST",
+    headers: { ...headers(server), Origin: "http://evil.example" },
+    body: JSON.stringify({ resourceId }),
+  });
+  assert.equal(invalidOrigin.status, 403);
+
+  const arbitraryPath = await fetch(`${server.origin}/api/actions/open`, {
+    method: "POST",
+    headers: headers(server),
+    body: JSON.stringify({ resourceId, path: "/etc/passwd" }),
+  });
+  assert.equal(arbitraryPath.status, 400);
+
+  const forgedId = await fetch(`${server.origin}/api/actions/open`, {
+    method: "POST",
+    headers: headers(server),
+    body: JSON.stringify({ resourceId: "forged-resource-id" }),
+  });
+  assert.equal(forgedId.status, 404);
+
+  const valid = await fetch(`${server.origin}/api/actions/open`, {
+    method: "POST",
+    headers: headers(server),
+    body: JSON.stringify({ resourceId }),
+  });
+  assert.equal(valid.status, 200);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0]?.args.slice(0, 1), ["--goto"]);
+});
+
+test("rejects a file replaced after the HTTP server inventory was created", async (t) => {
+  const { instructionPath, resourceId, scan } = await createScanFixture(t);
+  const server = await startDashboardServer({ initialScan: scan, port: 0 });
+  t.after(() => server.close());
+  await unlink(instructionPath);
+  await writeFile(instructionPath, "# Replaced\n", "utf8");
+
+  const response = await fetch(`${server.origin}/api/resources/${resourceId}/path`, {
+    headers: { Authorization: `Bearer ${server.credential}` },
+  });
+
+  assert.equal(response.status, 409);
+  assert.deepEqual(await response.json(), {
+    error: "resource_replaced",
+    message: "The discovered resource changed after the scan. Scan again before opening it.",
+  });
+});
+
+test("rejects a symlink redirected outside the root after server startup", async (t) => {
+  const { instructionPath, outsideRoot, resourceId, scan } = await createScanFixture(t, {
+    symlinked: true,
+  });
+  const server = await startDashboardServer({ initialScan: scan, port: 0 });
+  t.after(() => server.close());
+  const outsidePath = path.join(outsideRoot, "outside.md");
+  await writeFile(outsidePath, "# Outside\n", "utf8");
+  await unlink(instructionPath);
+  await symlink(outsidePath, instructionPath);
+
+  const response = await fetch(`${server.origin}/api/resources/${resourceId}/path`, {
+    headers: { Authorization: `Bearer ${server.credential}` },
+  });
+
+  assert.equal(response.status, 409);
+  assert.equal((await response.json() as { error: string }).error, "resource_replaced");
+});
+
+test("refuses to create a dashboard action service on a non-loopback host", async () => {
+  const context: ScanContext = {
+    homeDirectory: path.join(fixtureRoot, "home"),
+    repositoryPath: path.join(fixtureRoot, "repo"),
+    workingDirectory: path.join(fixtureRoot, "repo"),
+    environment: {},
+    executables: { codex: path.join(fixtureRoot, "bin", "codex") },
+  };
+  const scan = await scanProviders([new CodexAdapter()], context);
+
+  await assert.rejects(
+    startDashboardServer({ initialScan: scan, host: "0.0.0.0", port: 0 }),
+    /Dashboard server must bind exclusively to 127\.0\.0\.1/,
+  );
+});

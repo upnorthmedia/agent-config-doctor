@@ -1,0 +1,8 @@
+#!/usr/bin/env node
+
+if (process.argv.includes("--version")) {
+  process.stdout.write("codex development build\n");
+  process.exit(0);
+}
+
+process.exit(2);

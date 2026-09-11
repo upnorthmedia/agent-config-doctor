@@ -1,0 +1,26 @@
+skills:
+  external_dirs:
+    - ${HERMES_FIXTURE_EXTERNAL}
+plugins:
+  enabled:
+    - enabled-plugin
+    - project-plugin
+  disabled:
+    - disabled-plugin
+  entries:
+    enabled-plugin:
+      mcp_allowlist:
+        - fixture-mcp
+mcp_servers:
+  fixture-mcp:
+    command: node
+    args:
+      - server.js
+      - fixture-sensitive-argument
+    env:
+      API_TOKEN: fixture-sensitive-environment
+  disabled-mcp:
+    url: https://fixture-user:fixture-password@example.test/mcp?token=fixture-sensitive-query
+    headers:
+      Authorization: fixture-sensitive-header
+    enabled: false

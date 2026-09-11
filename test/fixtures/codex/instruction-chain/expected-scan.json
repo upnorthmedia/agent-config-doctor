@@ -1,0 +1,211 @@
+{
+  "schemaVersion": 1,
+  "providerVersion": "0.117.0-alpha.15",
+  "orderedInstructions": [
+    "$CODEX_HOME/AGENTS.md",
+    "$REPO/AGENTS.md",
+    "$REPO/packages/api/AGENTS.override.md",
+    "$REPO/packages/api/src/TEAM_GUIDE.md"
+  ],
+  "resources": [
+    {
+      "kind": "instruction",
+      "name": "AGENTS.md",
+      "path": "$CODEX_HOME/AGENTS.md",
+      "scope": "user",
+      "origin": "codex-home",
+      "owner": "self",
+      "state": "active",
+      "evidence": "parsed:file:$CODEX_HOME/AGENTS.md",
+      "order": 0
+    },
+    {
+      "kind": "instruction",
+      "name": "AGENTS.md",
+      "path": "$REPO/AGENTS.md",
+      "scope": "project",
+      "origin": "repository",
+      "owner": "self",
+      "state": "active",
+      "evidence": "parsed:file:$REPO/AGENTS.md",
+      "order": 1
+    },
+    {
+      "kind": "instruction",
+      "name": "AGENTS.md",
+      "path": "$REPO/packages/api/AGENTS.md",
+      "scope": "project",
+      "origin": "repository",
+      "owner": "self",
+      "state": "shadowed",
+      "evidence": "parsed:file:$REPO/packages/api/AGENTS.md",
+      "shadowedBy": "$REPO/packages/api/AGENTS.override.md"
+    },
+    {
+      "kind": "instruction",
+      "name": "AGENTS.override.md",
+      "path": "$REPO/packages/api/AGENTS.override.md",
+      "scope": "project",
+      "origin": "repository",
+      "owner": "self",
+      "state": "active",
+      "evidence": "parsed:file:$REPO/packages/api/AGENTS.override.md",
+      "order": 2
+    },
+    {
+      "kind": "instruction",
+      "name": "TEAM_GUIDE.md",
+      "path": "$REPO/packages/api/src/TEAM_GUIDE.md",
+      "scope": "project",
+      "origin": "repository",
+      "owner": "self",
+      "state": "active",
+      "evidence": "parsed:file:$REPO/packages/api/src/TEAM_GUIDE.md",
+      "order": 3
+    },
+    {
+      "kind": "instruction",
+      "name": "AGENTS.md",
+      "path": "$REPO/packages/web/AGENTS.md",
+      "scope": "project",
+      "origin": "repository",
+      "owner": "self",
+      "state": "inactive",
+      "evidence": "parsed:file:$REPO/packages/web/AGENTS.md"
+    },
+    {
+      "kind": "mcp",
+      "name": "fixture-http-disabled",
+      "path": "$CODEX_HOME/config.toml",
+      "scope": "user",
+      "origin": "codex-config",
+      "owner": "self",
+      "state": "disabled",
+      "evidence": "native:command:codex mcp list --json"
+    },
+    {
+      "kind": "mcp",
+      "name": "fixture-stdio",
+      "path": "$CODEX_HOME/config.toml",
+      "scope": "user",
+      "origin": "codex-config",
+      "owner": "self",
+      "state": "active",
+      "evidence": "native:command:codex mcp list --json"
+    },
+    {
+      "kind": "mcp",
+      "name": "plugin-fixture-mcp",
+      "path": "$CODEX_HOME/plugins/cache/test-market/fixture-plugin/1.2.3/.mcp.json",
+      "scope": "bundled",
+      "origin": "plugin",
+      "owner": "plugin:fixture-plugin@test-market",
+      "state": "active",
+      "evidence": "parsed:file:$CODEX_HOME/plugins/cache/test-market/fixture-plugin/1.2.3/.mcp.json"
+    },
+    {
+      "kind": "plugin",
+      "name": "disabled-plugin",
+      "path": "$CODEX_HOME/plugins/cache/test-market/disabled-plugin/2.0.0",
+      "scope": "user",
+      "origin": "marketplace:test-market",
+      "owner": "self",
+      "state": "disabled",
+      "evidence": "native:command:codex plugin list --json"
+    },
+    {
+      "kind": "plugin",
+      "name": "fixture-plugin",
+      "path": "$CODEX_HOME/plugins/cache/test-market/fixture-plugin/1.2.3",
+      "scope": "user",
+      "origin": "marketplace:test-market",
+      "owner": "self",
+      "state": "active",
+      "evidence": "native:command:codex plugin list --json"
+    },
+    {
+      "kind": "skill",
+      "name": "plugin-skill",
+      "path": "$CODEX_HOME/plugins/cache/test-market/fixture-plugin/1.2.3/skills/plugin-skill/SKILL.md",
+      "scope": "bundled",
+      "origin": "plugin",
+      "owner": "plugin:fixture-plugin@test-market",
+      "state": "active",
+      "evidence": "parsed:file:$CODEX_HOME/plugins/cache/test-market/fixture-plugin/1.2.3/skills/plugin-skill/SKILL.md"
+    },
+    {
+      "kind": "skill",
+      "name": "shared-skill",
+      "path": "$CODEX_HOME/skills/shared-skill/SKILL.md",
+      "scope": "user",
+      "origin": "codex-home-compatibility",
+      "owner": "self",
+      "state": "shadowed",
+      "evidence": "parsed:file:$CODEX_HOME/skills/shared-skill/SKILL.md",
+      "duplicateOf": "$HOME/.agents/skills/shared-skill/SKILL.md"
+    },
+    {
+      "kind": "skill",
+      "name": "shared-skill",
+      "path": "$HOME/.agents/skills/shared-skill/SKILL.md",
+      "scope": "user",
+      "origin": "agents-user",
+      "owner": "self",
+      "state": "active",
+      "evidence": "parsed:file:$HOME/.agents/skills/shared-skill/SKILL.md"
+    },
+    {
+      "kind": "skill",
+      "name": "user-audit",
+      "path": "$HOME/.agents/skills/user-audit/SKILL.md",
+      "scope": "user",
+      "origin": "agents-user",
+      "owner": "self",
+      "state": "active",
+      "evidence": "parsed:file:$HOME/.agents/skills/user-audit/SKILL.md"
+    },
+    {
+      "kind": "skill",
+      "name": "root-skill",
+      "path": "$REPO/.agents/skills/root-skill/SKILL.md",
+      "scope": "project",
+      "origin": "agents-repository",
+      "owner": "self",
+      "state": "active",
+      "evidence": "parsed:file:$REPO/.agents/skills/root-skill/SKILL.md"
+    },
+    {
+      "kind": "skill",
+      "name": "api-skill",
+      "path": "$REPO/packages/api/.agents/skills/api-skill/SKILL.md",
+      "scope": "project",
+      "origin": "agents-repository",
+      "owner": "self",
+      "state": "active",
+      "evidence": "parsed:file:$REPO/packages/api/.agents/skills/api-skill/SKILL.md"
+    },
+    {
+      "kind": "skill",
+      "name": "different-name",
+      "path": "$REPO/packages/api/.agents/skills/mismatched-directory/SKILL.md",
+      "scope": "project",
+      "origin": "agents-repository",
+      "owner": "self",
+      "state": "invalid",
+      "evidence": "parsed:file:$REPO/packages/api/.agents/skills/mismatched-directory/SKILL.md"
+    },
+    {
+      "kind": "skill",
+      "name": "web-skill",
+      "path": "$REPO/packages/web/.agents/skills/web-skill/SKILL.md",
+      "scope": "project",
+      "origin": "agents-repository",
+      "owner": "self",
+      "state": "inactive",
+      "evidence": "parsed:file:$REPO/packages/web/.agents/skills/web-skill/SKILL.md"
+    }
+  ],
+  "findingCodes": [
+    "codex.skill.name-directory-mismatch"
+  ]
+}

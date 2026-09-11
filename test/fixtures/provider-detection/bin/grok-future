@@ -1,0 +1,2 @@
+#!/usr/bin/env node
+process.stdout.write("grok 2.0.0 (fixture) [stable]\n");

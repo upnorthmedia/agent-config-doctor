@@ -1,0 +1,13 @@
+{
+  "instructions": ["global-not-loaded.md"],
+  "plugin": ["global-plugin"],
+  "mcp": {
+    "shared-mcp": {
+      "type": "remote",
+      "url": "https://fixture-user:fixture-password@example.test/mcp?token=fixture-sensitive-query",
+      "headers": {
+        "Authorization": "fixture-sensitive-header"
+      }
+    }
+  }
+}

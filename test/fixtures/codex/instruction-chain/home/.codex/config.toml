@@ -1,0 +1,13 @@
+project_doc_fallback_filenames = ["TEAM_GUIDE.md"]
+project_doc_max_bytes = 65536
+
+[mcp_servers.fixture-stdio]
+command = "node"
+args = ["server.js", "--credential", "fixture-sensitive-argument"]
+env = { API_TOKEN = "fixture-sensitive-environment-value" }
+
+[mcp_servers.fixture-http-disabled]
+url = "https://fixture-user:fixture-password@example.test/mcp?token=fixture-sensitive-query"
+enabled = false
+bearer_token_env_var = "MCP_BEARER_TOKEN"
+http_headers = { Authorization = "fixture-sensitive-header-value" }

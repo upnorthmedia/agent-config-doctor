@@ -1,0 +1,131 @@
+#!/usr/bin/env node
+
+import { fileURLToPath } from "node:url";
+
+if (process.argv.includes("--version")) {
+  process.stdout.write("codex-cli 0.117.0-alpha.15\n");
+  process.exit(0);
+}
+
+const fixtureRoot = fileURLToPath(new URL("..", import.meta.url));
+
+if (process.argv.includes("plugin") && process.argv.includes("list")) {
+  process.stdout.write(
+    JSON.stringify({
+      installed: [
+        {
+          name: "fixture-plugin",
+          pluginId: "fixture-plugin@test-market",
+          version: "1.2.3",
+          enabled: true,
+          installed: true,
+          marketplaceName: "test-market",
+          source: {
+            source: "cache",
+            path: fileURLToPath(
+              new URL(
+                "../home/.codex/plugins/cache/test-market/fixture-plugin/1.2.3",
+                import.meta.url,
+              ),
+            ),
+          },
+          marketplaceSource: {
+            source: "fixture-marketplace",
+            sourceType: "directory",
+          },
+          authPolicy: "allowed",
+          installPolicy: "allowed",
+        },
+        {
+          name: "disabled-plugin",
+          pluginId: "disabled-plugin@test-market",
+          version: "2.0.0",
+          enabled: false,
+          installed: true,
+          marketplaceName: "test-market",
+          source: {
+            source: "cache",
+            path: fileURLToPath(
+              new URL(
+                "../home/.codex/plugins/cache/test-market/disabled-plugin/2.0.0",
+                import.meta.url,
+              ),
+            ),
+          },
+          marketplaceSource: {
+            source: "fixture-marketplace",
+            sourceType: "directory",
+          },
+          authPolicy: "allowed",
+          installPolicy: "allowed",
+        },
+      ],
+      available: [],
+    }),
+  );
+  process.exit(0);
+}
+
+if (process.argv.includes("mcp") && process.argv.includes("list")) {
+  process.stdout.write(
+    JSON.stringify([
+      {
+        name: "fixture-stdio",
+        enabled: true,
+        disabled_reason: null,
+        auth_status: "not_required",
+        startup_timeout_sec: 10,
+        tool_timeout_sec: 60,
+        transport: {
+          type: "stdio",
+          command: "node",
+          args: ["server.js", "--credential", "fixture-sensitive-argument"],
+          cwd: fixtureRoot,
+          env: {
+            API_TOKEN: "fixture-sensitive-environment-value",
+          },
+          env_vars: ["PASSTHROUGH_TOKEN"],
+        },
+      },
+      {
+        name: "fixture-http-disabled",
+        enabled: false,
+        disabled_reason: "disabled by fixture configuration",
+        auth_status: "not_authenticated",
+        startup_timeout_sec: null,
+        tool_timeout_sec: null,
+        transport: {
+          type: "streamable_http",
+          url: "https://fixture-user:fixture-password@example.test/mcp?token=fixture-sensitive-query",
+          bearer_token_env_var: "MCP_BEARER_TOKEN",
+          http_headers: {
+            Authorization: "fixture-sensitive-header-value",
+          },
+          env_http_headers: {
+            "X-API-Key": "MCP_HEADER_ENV",
+          },
+          http_headers_helper: null,
+        },
+      },
+      {
+        name: "plugin-fixture-mcp",
+        enabled: true,
+        disabled_reason: null,
+        auth_status: "not_required",
+        startup_timeout_sec: null,
+        tool_timeout_sec: null,
+        transport: {
+          type: "stdio",
+          command: "node",
+          args: ["plugin-server.js", "fixture-sensitive-native-plugin-argument"],
+          cwd: fixtureRoot,
+          env: {},
+          env_vars: [],
+        },
+      },
+    ]),
+  );
+  process.exit(0);
+}
+
+process.exit(2);

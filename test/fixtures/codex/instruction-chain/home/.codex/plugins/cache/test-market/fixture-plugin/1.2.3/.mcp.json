@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "plugin-fixture-mcp": {
+      "command": "node",
+      "args": ["plugin-server.js", "--credential", "fixture-sensitive-plugin-argument"],
+      "env": {
+        "PLUGIN_TOKEN": "fixture-sensitive-plugin-environment-value"
+      }
+    }
+  }
+}

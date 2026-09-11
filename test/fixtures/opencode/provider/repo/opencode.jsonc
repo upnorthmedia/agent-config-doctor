@@ -1,0 +1,14 @@
+{
+  // Direct repository configuration.
+  "instructions": ["repo-direct-not-loaded.md"],
+  "plugin": ["shared-plugin"],
+  "mcp": {
+    "shared-mcp": {
+      "type": "local",
+      "command": ["node", "repo-server.js", "fixture-sensitive-argument"],
+      "environment": {
+        "API_TOKEN": "fixture-sensitive-environment"
+      },
+    },
+  },
+}

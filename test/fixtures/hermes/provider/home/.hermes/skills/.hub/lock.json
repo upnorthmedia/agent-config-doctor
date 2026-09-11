@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "installed": {
+    "hub-skill": {
+      "source": "github",
+      "identifier": "fixture/hub-skill",
+      "trust_level": "trusted",
+      "scan_verdict": "safe",
+      "content_hash": "fixture-content-hash",
+      "install_path": "hub-skill",
+      "files": ["SKILL.md"]
+    }
+  }
+}

@@ -1,0 +1,71 @@
+#!/usr/bin/env node
+
+import { fileURLToPath } from "node:url";
+
+if (process.argv.includes("--version")) {
+  process.stdout.write("2.1.268 (Claude Code)\n");
+  process.exit(0);
+}
+
+if (process.argv.includes("plugin") && process.argv.includes("list")) {
+  const fixtureRoot = fileURLToPath(new URL("..", import.meta.url));
+  process.stdout.write(
+    JSON.stringify([
+      {
+        id: "fixture-plugin@test-market",
+        version: "1.4.0",
+        scope: "user",
+        enabled: true,
+        installPath: fileURLToPath(
+          new URL("../home/.claude/plugins/fixture-plugin", import.meta.url),
+        ),
+        dependencies: ["base@test-market"],
+        dataPath: fileURLToPath(
+          new URL("../home/.claude/plugin-data/fixture-plugin", import.meta.url),
+        ),
+        mcpServers: {
+          "fixture-plugin-mcp": {
+            command: "node",
+            args: ["server.js", "fixture-sensitive-plugin-argument"],
+            env: {
+              PLUGIN_TOKEN: "fixture-sensitive-plugin-token",
+            },
+          },
+        },
+      },
+      {
+        id: "fixture-plugin@test-market",
+        version: "1.5.0",
+        scope: "local",
+        enabled: true,
+        installPath: fileURLToPath(
+          new URL("../repo/.claude/plugins/fixture-plugin", import.meta.url),
+        ),
+        dependencies: ["base@test-market"],
+        mcpServers: {
+          "fixture-plugin-mcp": {
+            command: "node",
+            args: ["server.js", "fixture-sensitive-local-plugin-argument"],
+            env: {
+              PLUGIN_TOKEN: "fixture-sensitive-local-plugin-token",
+            },
+          },
+        },
+      },
+      {
+        id: "managed-plugin@enterprise",
+        version: "3.0.0",
+        scope: "managed",
+        enabled: false,
+        installPath: fileURLToPath(
+          new URL("../admin/claude/plugins/managed-plugin", import.meta.url),
+        ),
+        dependencies: [],
+        mcpServers: {},
+      },
+    ]),
+  );
+  process.exit(0);
+}
+
+process.exit(2);

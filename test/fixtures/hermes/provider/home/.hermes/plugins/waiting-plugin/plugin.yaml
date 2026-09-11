@@ -1,0 +1,3 @@
+name: waiting-plugin
+version: "3.0.0"
+description: A discovered but not enabled fixture plugin.

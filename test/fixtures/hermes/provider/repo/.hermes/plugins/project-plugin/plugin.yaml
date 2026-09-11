@@ -1,0 +1,3 @@
+name: project-plugin
+version: "4.0.0"
+description: A project plugin blocked until its trust boundary is enabled.

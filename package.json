@@ -1,0 +1,53 @@
+{
+  "name": "agent-config-doctor",
+  "version": "1.0.0",
+  "description": "A local-first dashboard and CLI for diagnosing coding-agent configuration across harnesses.",
+  "type": "module",
+  "bin": {
+    "agent-config-doctor": "dist/cli.js"
+  },
+  "files": [
+    "dist/**/*.js",
+    "LICENSE",
+    "README.md",
+    "SECURITY.md"
+  ],
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json && node scripts/mark-cli-executable.mjs",
+    "prepack": "npm run build",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "license": "MIT",
+  "keywords": [
+    "agent-configuration",
+    "claude-code",
+    "codex",
+    "grok",
+    "opencode",
+    "hermes",
+    "mcp"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/upnorthmedia/agent-config-doctor.git"
+  },
+  "bugs": {
+    "url": "https://github.com/upnorthmedia/agent-config-doctor/issues"
+  },
+  "homepage": "https://github.com/upnorthmedia/agent-config-doctor#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.4",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "smol-toml": "^1.8.0",
+    "yaml": "^2.9.0"
+  }
+}

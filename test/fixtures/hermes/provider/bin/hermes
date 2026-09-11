@@ -1,0 +1,8 @@
+#!/usr/bin/env node
+
+if (process.argv.includes("--version")) {
+  process.stdout.write("Hermes Agent v0.12.0 (2026.4.30)\n");
+  process.exit(0);
+}
+
+process.exit(2);

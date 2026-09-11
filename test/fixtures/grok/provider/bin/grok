@@ -1,0 +1,179 @@
+#!/usr/bin/env node
+
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+if (process.argv.includes("--version")) {
+  process.stdout.write("grok 1.0.25 (fixture) [stable]\n");
+  process.exit(0);
+}
+
+if (process.argv.includes("inspect") && process.argv.includes("--json")) {
+  const fixtureRoot = fileURLToPath(new URL("..", import.meta.url));
+  const home = path.join(fixtureRoot, "home");
+  const repo = path.join(fixtureRoot, "repo");
+  const nested = process.cwd().startsWith(path.join(repo, "packages", "api"));
+  const projectInstructions = [
+    {
+      path: path.join(home, ".grok", "Agents.md"),
+      scope: "global",
+      fileType: "Agents.md",
+      sizeBytes: 42,
+      approxTokens: 10,
+    },
+    {
+      path: path.join(home, ".claude", "Claude.md"),
+      scope: "global",
+      fileType: "Claude.md",
+      sizeBytes: 40,
+      approxTokens: 10,
+      vendor: "claude",
+      compatibilityStatus: "disabled",
+    },
+    {
+      path: path.join(repo, "AGENTS.md"),
+      scope: "project",
+      fileType: "AGENTS.md",
+      sizeBytes: 35,
+      approxTokens: 9,
+    },
+    {
+      path: path.join(repo, "Claude.md"),
+      scope: "project",
+      fileType: "Claude.md",
+      sizeBytes: 37,
+      approxTokens: 9,
+    },
+    ...(nested
+      ? [
+          {
+            path: path.join(repo, "packages", "api", "AGENT.md"),
+            scope: "project",
+            fileType: "AGENT.md",
+            sizeBytes: 31,
+            approxTokens: 8,
+          },
+        ]
+      : []),
+  ];
+
+  process.stdout.write(
+    JSON.stringify({
+      grokVersion: "1.0.25",
+      cwd: process.cwd(),
+      projectRoot: repo,
+      projectTrusted: false,
+      projectInstructions,
+      skills: [
+        {
+          name: "shared-skill",
+          description: "Native Grok skill.",
+          source: {
+            type: "user",
+            path: path.join(home, ".grok", "skills", "shared-skill", "SKILL.md"),
+          },
+          userInvocable: true,
+        },
+        {
+          name: "plugin-skill",
+          description: "Plugin-owned skill.",
+          source: {
+            type: "plugin",
+            plugin_name: "trusted-plugin",
+            path: path.join(home, ".grok", "plugins", "trusted-plugin", "skills", "plugin-skill", "SKILL.md"),
+          },
+          userInvocable: true,
+        },
+      ],
+      plugins: [
+        {
+          name: "trusted-plugin",
+          path: path.join(home, ".grok", "plugins", "trusted-plugin"),
+          scope: "user",
+          enabled: true,
+          trusted: true,
+          provides: {
+            skills: ["plugin-skill"],
+            mcpServers: ["trusted-plugin-mcp"],
+          },
+        },
+        {
+          name: "project-plugin",
+          path: path.join(repo, ".grok", "plugins", "project-plugin"),
+          scope: "project",
+          enabled: true,
+          trusted: false,
+          provides: {
+            skills: [],
+            mcpServers: ["blocked-plugin-mcp"],
+          },
+        },
+        {
+          name: "disabled-plugin",
+          path: path.join(home, ".grok", "plugins", "disabled-plugin"),
+          scope: "user",
+          enabled: false,
+          trusted: true,
+          provides: {
+            skills: [],
+            mcpServers: [],
+          },
+        },
+      ],
+      mcpServers: [
+        {
+          name: "fixture-direct-mcp",
+          source: {
+            type: "configToml",
+            path: path.join(home, ".grok", "config.toml"),
+          },
+          transport: "http",
+          target: "https://fixture-user:fixture-password@example.test/mcp?token=fixture-sensitive-query",
+        },
+        {
+          name: "trusted-plugin-mcp",
+          source: {
+            type: "plugin",
+            plugin_name: "trusted-plugin",
+            path: path.join(home, ".grok", "plugins", "trusted-plugin"),
+          },
+          transport: "stdio",
+          target: "node fixture-sensitive-plugin-argument",
+        },
+        {
+          name: "blocked-plugin-mcp",
+          source: {
+            type: "plugin",
+            plugin_name: "project-plugin",
+            path: path.join(repo, ".grok", "plugins", "project-plugin"),
+          },
+          transport: "stdio",
+          target: "node blocked-server.js",
+        },
+      ],
+      externalCompat: {
+        remoteSettingsLoaded: false,
+        cells: [
+          {
+            vendor: "claude",
+            surface: "rules",
+            enabled: false,
+            source: "fixture",
+          },
+        ],
+      },
+      configSources: {
+        layers: [
+          {
+            role: "user",
+            path: path.join(home, ".grok", "config.toml"),
+          },
+        ],
+      },
+      configWarnings: [],
+    }),
+  );
+  process.exit(0);
+}
+
+process.exit(2);

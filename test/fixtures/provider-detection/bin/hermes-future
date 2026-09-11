@@ -1,0 +1,2 @@
+#!/usr/bin/env node
+process.stdout.write("Hermes Agent v0.13.0 (2026.5.1)\n");

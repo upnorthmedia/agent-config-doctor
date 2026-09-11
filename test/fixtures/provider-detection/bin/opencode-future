@@ -1,0 +1,2 @@
+#!/usr/bin/env node
+process.stdout.write("3.0.0\n");

@@ -1,0 +1,2 @@
+#!/usr/bin/env node
+process.stdout.write("Grok development build\n");

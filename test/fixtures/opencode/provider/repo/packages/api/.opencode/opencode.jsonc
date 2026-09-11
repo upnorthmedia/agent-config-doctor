@@ -1,0 +1,10 @@
+{
+  "instructions": ["api-dotdir-not-loaded.md"],
+  "plugin": ["api-plugin"],
+  "mcp": {
+    "shared-mcp": {
+      "type": "remote",
+      "url": "https://api.example.test/mcp"
+    }
+  }
+}
