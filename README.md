@@ -44,7 +44,7 @@ node dist/cli.js /path/to/repository --no-open
 npx agent-config-doctor [path] [--no-open] [--editor <name>]
 ```
 
-`path` defaults to the current working directory. The dashboard contains overview, installed inventory, effective configuration, findings, and resource detail views. Search and filters operate on the current in-memory scan.
+`path` defaults to the current working directory and is the only working directory the dashboard scans. The dashboard contains overview, installed inventory, effective configuration, findings, and resource detail views. Search and filters operate on the current in-memory scan. To inspect a different directory, launch Agent Config Doctor again with that path.
 
 `--editor` selects one detected GUI editor from `code`, `cursor`, `zed`, or `subl`. Agent Config Doctor never accepts an arbitrary editor command. If no supported editor is available, copy-path and reveal actions remain available.
 
@@ -60,7 +60,13 @@ Omit the path to scan the current working directory:
 npx agent-config-doctor scan --json
 ```
 
-The command writes only schema-versioned JSON to stdout. Status and errors use stderr. The report uses the same normalized records as the dashboard.
+The command writes only schema-versioned JSON to stdout. Status, errors, and scan notices use stderr. The report uses the same normalized records as the dashboard.
+
+### Scope of a scan
+
+Effective configuration is built only from the selected directory and its real ancestor chain up to the repository root, plus the provider's user, administrator, and provider-managed locations. The whole repository is still walked so that every instruction file, skill, plugin, and MCP definition stays visible, but a file found outside that chain (a sibling package, a test fixture, a nested synthetic home directory) is reported with `reach: "repository"`, is never active, and is left out of the overview totals. The dashboard lists those resources under "Elsewhere in repository" and the `doctor` summary counts them separately.
+
+The repository walk skips version-control and generated directories: `.git`, `.hg`, `.svn`, `node_modules`, `dist`, `build`, `coverage`, `.venv`, `venv`, `__pycache__`, `.cache`, `.next`, `.turbo`, `.tox`, `.mypy_cache`, and `.pytest_cache`. Directory symlinks are not followed.
 
 ### Doctor summary
 
@@ -79,16 +85,35 @@ Agent Config Doctor applies discovery rules only to recognized versions. Other i
 | Claude Code | 2.1.x | Managed, user, project, local, nested, and imported instructions; skills; plugins; MCP servers | Uses `claude plugin list --json` plus parsed files. Hooks and agent definitions are not emitted. |
 | Codex | 0.117.x through 0.154.x | Global and project instruction chains; fallback names; skills; plugins; standalone and plugin MCP servers | Uses read-only plugin and MCP list commands plus parsed files. Hooks and agent definitions are not emitted. |
 | Grok Build | 1.0.x | Native instruction order; compatibility skills; plugins; MCP servers; trust and policy state | Requires valid `grok inspect --json` output. Hook and agent capabilities are not emitted as inventory records in v1. |
-| OpenCode | 2.x | `AGENTS.md` order; native and compatibility skills; configured plugins and MCP servers | Filesystem and configuration inference only. Configured instruction fields stay visible but inactive. Agent definitions are not emitted. |
+| OpenCode | 1.18.x | Global and project instruction precedence including `CLAUDE.md` and `CONTEXT.md` fallbacks and `instructions` globs; skills from every documented location plus the built-in `customize-opencode` skill; configured and directory plugins; merged MCP servers; `OPENCODE_DISABLE_*` flags; missing references | Parse-only. `opencode debug` commands are not used because they print provider API keys and full skill bodies and write to the OpenCode database. Remote `instructions` URLs, `skills.urls`, and `OPENCODE_CONFIG_CONTENT` are recorded but not fetched or parsed. Agent definitions are not emitted. 2.x rules are documented in the isolated v2 module but are not verified against a released binary, so 2.x is reported as unsupported. |
 | Hermes | 0.12.x | Context priority; bundled, hub, protected, external, and plugin skills; plugins; MCP servers and allowlists | Filesystem and configuration inference only. Hooks and agent definitions are not emitted. |
 
 Providers must be installed for their configuration to be scanned. Missing executables are shown as unavailable.
+
+### Native inspection and scan completeness
+
+Native listing commands (`claude plugin list --json`, `codex plugin list --json`, `codex mcp list --json`, `grok inspect --json`) run asynchronously with a 15 second budget each, so a slow provider start does not block the others. A command that times out, exits with an error, returns malformed JSON, or cannot be started is recorded as a scan notice instead of being treated as "no native data". Notices name the provider and the command, explain which evidence is incomplete, and say how to rerun the scan. They appear in the JSON report under `notices`, on stderr for `scan --json`, in the `doctor` summary, and as a banner in the dashboard. Notices are operational; they are never findings against your configuration and never change the error count. Each entry in `providers` also carries `complete: false` while its evidence is incomplete.
+
+## JSON report
+
+Every report carries `schemaVersion: 1`. Version 1.0.1 adds optional fields only; existing fields keep their meaning.
+
+| Field | Values | Meaning |
+| --- | --- | --- |
+| `resources[].reach` | `chain`, `repository` | Whether the resource applies to the selected directory's ancestor chain or was only found elsewhere in the repository. |
+| `resources[].loadMode` | `context-loaded`, `on-demand`, `explicitly-enabled` | Instructions load into context, skills are available on demand, plugins and MCP servers must be enabled. |
+| `resources[].generated` | `true` when present | Caches and provider runtime copies (plugin caches, Codex system skills, Grok bundled skills, Hermes bundled copies) that the user does not author. |
+| `resources[].owner.type` | `self`, `administrator`, `plugin`, `package`, `provider` | Who controls the file. `self` means the user. Codex marketplace plugins, Grok bundled skills, and Hermes bundled or protected skills are `provider` owned. |
+| `providers[].complete` | boolean | `false` when a native inspection command for that provider failed. |
+| `notices[]` | `{ code, provider, command, message, remediation }` | Operational scan notices such as `native.command.timeout`. |
+
+A display name that differs from its folder never invalidates a skill on its own. It is a medium-confidence warning when the user controls the skill and an informational finding when a provider, plugin, or package manages it.
 
 ## Read-only behavior
 
 Agent Config Doctor does not edit, create, disable, update, uninstall, or delete provider configuration. It does not start configured MCP servers or evaluate commands found in provider configuration.
 
-Provider detection runs each provider's `--version` command. Supported native inspection is limited to read-only listing commands such as `grok inspect --json`, `claude plugin list --json`, and Codex plugin and MCP list commands.
+Provider detection runs each provider's `--version` command. Supported native inspection is limited to read-only listing commands such as `grok inspect --json`, `claude plugin list --json`, and Codex plugin and MCP list commands. OpenCode and Hermes are inspected by parsing files only.
 
 Open-in-editor and reveal actions can launch a local application. The dashboard sends an opaque resource ID, and the server revalidates the discovered file, symlink target, inode, and allowed root immediately before launch. Processes use argument arrays with `shell: false`. Any edits made later inside the selected editor are outside Agent Config Doctor.
 
@@ -122,7 +147,9 @@ See [SECURITY.md](./SECURITY.md) for vulnerability reporting. Use GitHub private
 - Hooks and agent definitions are part of the normalized model but are not yet populated by the v1 adapters.
 - The tool does not analyze transcripts, measure resource usage, or claim that a resource is unused.
 - It does not manage provider lifecycle actions or offer automatic cleanup.
-- Very large repositories can take longer to scan because supported instruction and skill locations are inspected recursively.
+- Very large repositories can take longer to scan because supported instruction and skill locations are inspected recursively, apart from the generated directories listed under "Scope of a scan".
+- OpenCode support covers 1.18.x only. Remote instruction URLs and `skills.urls` are recorded without fetching, `OPENCODE_CONFIG_CONTENT` is not parsed, and skill override order follows discovery order while the OpenCode binary loads duplicates concurrently, so a duplicate name is reported as a warning rather than resolved with certainty.
+- The dashboard scans the launch directory only; there is no in-app working directory switcher.
 - The dashboard is a local process, not a background service. Closing the page does not stop it; press `Ctrl-C` in the launching terminal.
 
 ## License

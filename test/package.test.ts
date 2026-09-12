@@ -84,7 +84,7 @@ test("declares the approved public v1 package contract", async () => {
   ) as PackageMetadata;
 
   assert.equal(metadata.name, "agent-config-doctor");
-  assert.equal(metadata.version, "1.0.0");
+  assert.equal(metadata.version, "1.0.1");
   assert.equal(metadata.private, undefined);
   assert.equal(metadata.license, "MIT");
   assert.deepEqual(metadata.engines, { node: ">=24" });
@@ -169,7 +169,7 @@ test(
     const installedMetadata = JSON.parse(
       await readFile(path.join(installedPackageRoot, "package.json"), "utf8"),
     ) as PackageMetadata;
-    assert.equal(installedMetadata.version, "1.0.0");
+    assert.equal(installedMetadata.version, "1.0.1");
     await access(path.join(installRoot, "node_modules", "smol-toml", "package.json"));
     await access(path.join(installRoot, "node_modules", "yaml", "package.json"));
     await assert.rejects(
