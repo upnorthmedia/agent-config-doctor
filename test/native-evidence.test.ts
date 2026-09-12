@@ -74,13 +74,17 @@ test("a timed-out native command produces a provider-scoped notice without infla
     snapshot.effective.resources.some((resource) => resource.kind === "mcp"),
     "other native evidence still loads",
   );
-  assert.deepEqual(
-    snapshot.findings.map((finding) => finding.code).sort(),
-    baseline.findings.map((finding) => finding.code).sort(),
-  );
+  // The failure adds nothing to the findings list: whatever remains comes
+  // from evidence that was still collected.
+  const baselineCodes = new Set(baseline.findings.map((finding) => finding.code));
+  assert.ok(snapshot.findings.every((finding) => baselineCodes.has(finding.code)));
   assert.equal(
     snapshot.findings.some((finding) => finding.code.startsWith("native.")),
     false,
+  );
+  assert.ok(
+    snapshot.findings.filter((finding) => finding.severity === "error").length <=
+      baseline.findings.filter((finding) => finding.severity === "error").length,
   );
   assert.equal(report.detection.complete, false);
   assert.deepEqual(

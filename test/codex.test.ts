@@ -195,7 +195,12 @@ test("discovers skills, plugins, and MCP servers with ownership and redaction", 
   assert.deepEqual(standaloneMcp?.owner, { type: "self" });
   assert.equal(standaloneMcp?.state, "active");
   assert.equal(disabledMcp?.state, "disabled");
-  assert.equal(invalidSkill?.state, "invalid");
+  assert.equal(invalidSkill?.state, "active");
+  assert.equal(
+    invalidSkill?.findings[0]?.code,
+    "codex.skill.name-directory-mismatch",
+  );
+  assert.equal(invalidSkill?.findings[0]?.severity, "warning");
   assert.equal(siblingSkill?.state, "inactive");
 
   const duplicateSkills = effective.resources.filter(

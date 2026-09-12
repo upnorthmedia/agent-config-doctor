@@ -426,6 +426,13 @@ async function discoverSkills(
         name,
         scope: origin === "hermes-local" ? "user" : "bundled",
         origin,
+        // Hermes ships bundled skills and keeps a protected copy when the user
+        // edits one, so both stay under Hermes ownership. Only the untouched
+        // bundled copy is a generated runtime file.
+        ...(originHash !== undefined
+          ? { owner: { type: "provider" as const, id: "hermes" } }
+          : {}),
+        ...(origin === "hermes-bundled" ? { generated: true } : {}),
         state: parsed.error ? "invalid" : "active",
         metadata,
         ...(parsed.error ? { error: parsed.error } : {}),
@@ -474,6 +481,8 @@ async function createSkillResource(options: {
   name: string;
   scope: ResourceScope;
   origin: string;
+  owner?: ResourceRecord["owner"];
+  generated?: boolean;
   state: ResourceState;
   metadata: Record<string, JsonValue>;
   error?: string;
@@ -493,9 +502,10 @@ async function createSkillResource(options: {
     name: options.name,
     scope: options.scope,
     origin: options.origin,
-    owner: { type: "self" },
+    owner: options.owner ?? { type: "self" },
     path: await canonicalPath(options.skillPath),
     displayPath: shownPath,
+    ...(options.generated ? { generated: true } : {}),
     state: options.state,
     precedence: {},
     evidenceType: "parsed",

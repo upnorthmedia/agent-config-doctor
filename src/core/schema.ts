@@ -29,6 +29,16 @@ export type ResourceState =
 
 export type ResourceReach = "chain" | "repository";
 
+/**
+ * How a provider brings a resource into a session: instructions are loaded
+ * into context, skills are available on demand, and plugins or MCP servers
+ * must be explicitly enabled.
+ */
+export type ResourceLoadMode =
+  | "context-loaded"
+  | "on-demand"
+  | "explicitly-enabled";
+
 export type EvidenceType = "native" | "parsed" | "inferred";
 export type FindingSeverity = "info" | "warning" | "error";
 export type FindingConfidence = "low" | "medium" | "high";
@@ -79,6 +89,9 @@ export interface ResourceRecord {
   path?: string;
   displayPath?: string;
   reach?: ResourceReach;
+  loadMode?: ResourceLoadMode;
+  /** True for caches and provider runtime copies that the user does not author. */
+  generated?: boolean;
   state: ResourceState;
   precedence: Record<string, JsonValue>;
   evidenceType: EvidenceType;

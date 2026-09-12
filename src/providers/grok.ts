@@ -394,9 +394,12 @@ async function parseSkills(
     seenPaths.add(path.resolve(skillPath));
     const sourceType = stringValue(value.source.type) ?? "unknown";
     const pluginName = stringValue(value.source.plugin_name);
-    const owner = pluginName
-      ? ({ type: "plugin", id: pluginName } as const)
-      : ({ type: "self" } as const);
+    const bundled = sourceType === "bundled";
+    const owner: ResourceRecord["owner"] = pluginName
+      ? { type: "plugin", id: pluginName }
+      : bundled
+        ? { type: "provider", id: "grok" }
+        : { type: "self" };
     const pluginState = pluginName
       ? plugins.find((plugin) => plugin.name === pluginName)?.state
       : undefined;
@@ -410,11 +413,12 @@ async function parseSkills(
         provider: "grok",
         providerVersion,
         name,
-        scope: pluginName ? "bundled" : sourceType === "project" ? "project" : "user",
+        scope: pluginName || bundled ? "bundled" : sourceType === "project" ? "project" : "user",
         origin: pluginName ? "plugin" : sourceType,
         owner,
         path: await canonicalPath(skillPath),
         displayPath: shownPath,
+        ...(bundled ? { generated: true } : {}),
         state,
         precedence: {},
         evidenceType: "native",

@@ -551,6 +551,7 @@ async function createSkillResource(
   owner: ResourceRecord["owner"],
   state: ResourceState,
   reach?: ResourceRecord["reach"],
+  generated?: boolean,
 ): Promise<ResourceRecord> {
   const contents = await readFile(skillPath, "utf8");
   const parsed = parseSkillFrontmatter(contents);
@@ -581,6 +582,7 @@ async function createSkillResource(
     path: await canonicalPath(skillPath),
     displayPath: shownPath,
     ...(reach ? { reach } : {}),
+    ...(generated ? { generated } : {}),
     state: findings.length > 0 ? "invalid" : state,
     precedence: {},
     evidenceType: "parsed",
@@ -658,6 +660,7 @@ async function discoverPlugins(
       owner: scope === "managed" ? { type: "administrator" } : { type: "self" },
       path: await canonicalPath(installPath),
       displayPath: shownPath,
+      generated: true,
       state,
       precedence: {},
       evidenceType: "native",
@@ -683,6 +686,8 @@ async function discoverPlugins(
           "plugin",
           { type: "plugin", id: pluginId },
           state,
+          undefined,
+          true,
         ),
       );
     }
@@ -707,6 +712,7 @@ async function discoverPlugins(
         owner: { type: "plugin", id: pluginId },
         path: await canonicalPath(installPath),
         displayPath: shownPath,
+        generated: true,
         state,
         precedence: {},
         evidenceType: "native",

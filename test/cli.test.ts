@@ -142,7 +142,7 @@ test("doctor prints findings and serves a local dashboard URL", async () => {
   assert.match(result.stdout, /^Agent Config Doctor\n/);
   assert.match(result.stdout, /Providers: 1 detected, 4 unavailable/);
   assert.match(result.stdout, /Resources: \d+ installed, [1-9]\d* elsewhere in repository/);
-  assert.match(result.stdout, /Findings: 1 error, 4 warnings, 0 info/);
+  assert.match(result.stdout, /Findings: 0 errors, 5 warnings, 1 info/);
   assert.match(result.stdout, /Scan: complete/);
   assert.equal(result.stdout.includes(fixtureRoot), false);
   assert.equal(result.stdout.includes("fixture-sensitive"), false);

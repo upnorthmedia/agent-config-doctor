@@ -6,6 +6,8 @@ import type {
   EffectiveConfiguration,
   JsonValue,
   PublicResourceRecord,
+  ResourceKind,
+  ResourceLoadMode,
   ScanReport,
   ScanSnapshot,
 } from "./schema.ts";
@@ -16,7 +18,7 @@ export async function scanProvider(
 ): Promise<ScanSnapshot> {
   const detection = await adapter.detect(context);
   const discovery = await adapter.discover(context, detection);
-  const effective = scopeToAncestorChain(
+  const effective = normalizeEffective(
     await adapter.resolveEffective(context, discovery.resources, detection),
   );
   const findings = [
@@ -32,20 +34,30 @@ export async function scanProvider(
   };
 }
 
+const defaultLoadModes: Partial<Record<ResourceKind, ResourceLoadMode>> = {
+  instruction: "context-loaded",
+  skill: "on-demand",
+  plugin: "explicitly-enabled",
+  mcp: "explicitly-enabled",
+};
+
 /**
- * Effective configuration is built only from the selected directory's real
- * ancestor chain. Resources discovered elsewhere in the repository stay in
- * inventory with `reach: "repository"`, but they never become active and they
- * are not part of the ordered chain or the effective decisions.
+ * Fills the optional classification fields every adapter shares and scopes
+ * the effective configuration to the selected directory's real ancestor
+ * chain. Resources discovered elsewhere in the repository stay in inventory
+ * with `reach: "repository"`, but they never become active and they are not
+ * part of the ordered chain or the effective decisions.
  */
-function scopeToAncestorChain(
+function normalizeEffective(
   effective: EffectiveConfiguration,
 ): EffectiveConfiguration {
   const resources = effective.resources.map((resource) => {
     const reach = resource.reach ?? "chain";
+    const loadMode = resource.loadMode ?? defaultLoadModes[resource.kind];
     return {
       ...resource,
       reach,
+      ...(loadMode ? { loadMode } : {}),
       state:
         reach === "repository" && resource.state === "active"
           ? ("inactive" as const)

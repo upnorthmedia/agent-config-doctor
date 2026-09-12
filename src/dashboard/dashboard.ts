@@ -448,6 +448,12 @@ export const dashboardClientScript = String.raw`
     return state.report.resources.find((resource) => resource.id === id);
   }
 
+  function ownerLabel(resource) {
+    const owner = resource.owner;
+    const base = owner.type === "self" ? "You" : owner.type === "provider" ? "Provider-managed (" + providerLabel(owner.id || resource.provider) + ")" : owner.type === "plugin" ? "Plugin " + (owner.id || "unknown") : owner.type === "administrator" ? "Administrator" : "Package" + (owner.id ? " " + owner.id : "");
+    return resource.generated ? base + ", generated copy" : base;
+  }
+
   function inContext(resource) {
     return resource.reach !== "repository";
   }
@@ -722,9 +728,10 @@ export const dashboardClientScript = String.raw`
       detailPair("Kind", resource.kind),
       detailPair("Scope", resource.scope),
       detailPair("Reach", inContext(resource) ? "In the selected context chain" : "Elsewhere in repository"),
+      detailPair("Load mode", resource.loadMode || "unknown"),
       detailPair("State", resource.state),
       detailPair("Origin", resource.origin),
-      detailPair("Owner", resource.owner.id || resource.owner.type),
+      detailPair("Owner", ownerLabel(resource)),
       detailPair("Evidence", resource.evidenceType + ": " + resource.evidenceReceipt),
       detailPair("Source", resource.displayPath || "Not file-backed"),
     );

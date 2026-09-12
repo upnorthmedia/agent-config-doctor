@@ -364,6 +364,7 @@ async function discoverStandaloneSkills(
     origin: string;
     owner: ResourceRecord["owner"];
     reach: ResourceRecord["reach"];
+    generated?: boolean;
     active: boolean;
   }> = [];
   const userSkillRoot = path.join(context.homeDirectory, ".agents", "skills");
@@ -401,6 +402,7 @@ async function discoverStandaloneSkills(
       origin: "codex-system",
       owner: { type: "provider", id: "codex" },
       reach: "chain",
+      generated: true,
       active: true,
     });
   }
@@ -437,7 +439,7 @@ async function discoverStandaloneSkills(
   }
 
   const skills = await Promise.all(
-    skillLocations.map(({ skillPath, scope, origin, owner, reach, active }) =>
+    skillLocations.map(({ skillPath, scope, origin, owner, reach, generated, active }) =>
       createSkillResource({
         skillPath,
         context,
@@ -447,6 +449,7 @@ async function discoverStandaloneSkills(
         origin,
         owner,
         reach,
+        ...(generated ? { generated } : {}),
         state: active ? "active" : "inactive",
       }),
     ),
@@ -507,6 +510,7 @@ interface CreateSkillResourceOptions {
   origin: string;
   owner: ResourceRecord["owner"];
   reach: ResourceRecord["reach"];
+  generated?: boolean;
   state: ResourceRecord["state"];
 }
 
@@ -519,6 +523,7 @@ async function createSkillResource({
   origin,
   owner,
   reach,
+  generated,
   state,
 }: CreateSkillResourceOptions): Promise<ResourceRecord> {
   const canonical = await canonicalPath(skillPath);
@@ -539,11 +544,17 @@ async function createSkillResource({
     });
   }
   if (frontmatter.name && frontmatter.name !== directoryName) {
+    // A display name that differs from its folder never invalidates a skill on
+    // its own. It is worth a look when the user controls the file and merely
+    // informational when a provider, plugin, or package manages it.
+    const userControlled = owner.type === "self" && !generated;
     findings.push({
       code: "codex.skill.name-directory-mismatch",
-      severity: "error",
-      confidence: "high",
-      message: `Skill name ${frontmatter.name} does not match directory ${directoryName}.`,
+      severity: userControlled ? "warning" : "info",
+      confidence: userControlled ? "medium" : "high",
+      message: userControlled
+        ? `Skill name ${frontmatter.name} does not match directory ${directoryName}.`
+        : `Skill name ${frontmatter.name} does not match directory ${directoryName}. ${ownerLabel(owner)} manages this skill, so no action is needed.`,
       resourceId: id,
     });
   }
@@ -561,6 +572,7 @@ async function createSkillResource({
     path: canonical,
     displayPath: shownPath,
     ...(reach ? { reach } : {}),
+    ...(generated ? { generated } : {}),
     state: invalid ? "invalid" : state,
     precedence: {},
     evidenceType: "parsed",
@@ -573,6 +585,19 @@ async function createSkillResource({
     },
     findings,
   };
+}
+
+function ownerLabel(owner: ResourceRecord["owner"]): string {
+  if (owner.type === "provider") {
+    return "Codex";
+  }
+  if (owner.type === "plugin") {
+    return `The plugin ${owner.id ?? "owner"}`;
+  }
+  if (owner.type === "administrator") {
+    return "An administrator";
+  }
+  return "A package";
 }
 
 function markCanonicalDuplicates(skills: ResourceRecord[]): void {
@@ -675,9 +700,12 @@ async function discoverPlugins(
       name,
       scope: "user",
       origin: `marketplace:${marketplaceName}`,
-      owner: { type: "self" },
+      // Codex installs and updates marketplace plugins in its own cache; the
+      // user enables them but does not author their files.
+      owner: { type: "provider", id: "codex" },
       ...(pluginPath ? { path: pluginPath } : {}),
       ...(shownPath ? { displayPath: shownPath } : {}),
+      generated: true,
       state: enabled ? "active" : "disabled",
       precedence: {},
       evidenceType: "native",
@@ -741,6 +769,7 @@ async function discoverPluginChildren(
           origin: "plugin",
           owner: { type: "plugin", id: pluginId },
           reach: "chain",
+          generated: true,
           state: plugin.state === "active" ? "active" : "disabled",
         }),
       );
@@ -768,6 +797,7 @@ async function discoverPluginChildren(
       owner: { type: "plugin", id: pluginId },
       path: await canonicalPath(mcpConfigPath),
       displayPath: shownPath,
+      generated: true,
       state: plugin.state === "active" ? "active" : "disabled",
       precedence: {},
       evidenceType: "parsed",
