@@ -75,6 +75,15 @@ if (process.argv.includes("inspect") && process.argv.includes("--json")) {
           userInvocable: true,
         },
         {
+          name: "bundled-skill",
+          description: "Skill bundled with Grok Build.",
+          source: {
+            type: "bundled",
+            path: path.join(home, ".grok", "bundled", "skills", "bundled-skill", "SKILL.md"),
+          },
+          userInvocable: true,
+        },
+        {
           name: "plugin-skill",
           description: "Plugin-owned skill.",
           source: {

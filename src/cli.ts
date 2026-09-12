@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import type { CoordinatedScan } from "./core/coordinator.ts";
 import { scanPath } from "./core/runtime.ts";
+import { isInContext } from "./core/scanner.ts";
 import { detectGuiEditors, selectGuiEditor } from "./server/actions.ts";
 import { startDashboardServer } from "./server/server.ts";
 
@@ -51,7 +52,16 @@ async function runScan(argv: string[]): Promise<number> {
   }
   const scan = await scanPath(positional[0] ?? process.cwd());
   process.stdout.write(`${JSON.stringify(scan.report, null, 2)}\n`);
+  writeNotices(scan, process.stderr);
   return 0;
+}
+
+function writeNotices(scan: CoordinatedScan, stream: NodeJS.WriteStream): void {
+  for (const notice of scan.report.notices) {
+    stream.write(
+      `Notice (${notice.provider}, scan incomplete): ${notice.message}\n  ${notice.remediation}\n`,
+    );
+  }
 }
 
 async function runDoctor(argv: string[]): Promise<number> {
@@ -70,21 +80,32 @@ function writeDoctorSummary(scan: CoordinatedScan): void {
   const detected = scan.report.providers.filter((provider) => provider.installed).length;
   const unavailable = scan.report.providers.length - detected;
   const counts = { error: 0, warning: 0, info: 0 };
+  let elsewhereFindings = 0;
   for (const finding of scan.report.findings) {
-    counts[finding.severity] += 1;
+    if (isInContext(finding)) {
+      counts[finding.severity] += 1;
+    } else {
+      elsewhereFindings += 1;
+    }
   }
+  const elsewhere = scan.report.resources.filter(
+    (resource) => resource.reach === "repository",
+  ).length;
+  const installed = scan.report.resources.length - elsewhere;
 
   process.stdout.write(
     [
       "Agent Config Doctor",
       "",
       `Providers: ${detected} detected, ${unavailable} unavailable`,
-      `Resources: ${scan.report.resources.length} installed`,
-      `Findings: ${formatCount(counts.error, "error")}, ${formatCount(counts.warning, "warning")}, ${counts.info} info`,
-      "",
+      `Resources: ${installed} installed, ${elsewhere} elsewhere in repository`,
+      `Findings: ${formatCount(counts.error, "error")}, ${formatCount(counts.warning, "warning")}, ${counts.info} info${elsewhereFindings > 0 ? ` (${elsewhereFindings} more elsewhere in repository)` : ""}`,
+      `Scan: ${scan.report.notices.length === 0 ? "complete" : `incomplete, ${formatCount(scan.report.notices.length, "notice")}`}`,
       "",
     ].join("\n"),
   );
+  writeNotices(scan, process.stdout);
+  process.stdout.write("\n");
 }
 
 function formatCount(count: number, singular: string): string {
@@ -141,7 +162,6 @@ async function serveDashboard(
   const editor = selectGuiEditor(options.editorOverride, editors);
   const server = await startDashboardServer({
     initialScan: scan,
-    scanWorkingDirectory: scanPath,
     ...(editor ? { editor } : {}),
   });
   const shutdown = waitForShutdown();

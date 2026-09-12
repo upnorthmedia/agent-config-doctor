@@ -4,6 +4,7 @@ import type {
   ProviderId,
   ResourceKind,
   ResourceRecord,
+  ScanNotice,
 } from "./schema.ts";
 
 export interface ScanContext {
@@ -13,6 +14,14 @@ export interface ScanContext {
   environment: Readonly<Record<string, string | undefined>>;
   executables?: Readonly<Partial<Record<ProviderId, string>>>;
   adminRoots?: Readonly<Partial<Record<ProviderId, string>>>;
+  /** Budget for one native inspection command. Defaults to 15 seconds. */
+  nativeCommandTimeoutMs?: number;
+}
+
+export interface DiscoveryResult {
+  resources: ResourceRecord[];
+  /** Operational notices, such as a native listing that could not be used. */
+  notices: ScanNotice[];
 }
 
 export interface ProviderDetection {
@@ -21,6 +30,8 @@ export interface ProviderDetection {
   version: string;
   support: "supported" | "unsupported" | "unavailable";
   generation?: string;
+  /** Extra context for an unsupported version, appended to its finding. */
+  supportNote?: string;
   executablePath?: string;
   configRoots: string[];
 }
@@ -38,7 +49,7 @@ export interface ProviderAdapter {
   discover(
     context: ScanContext,
     detection: ProviderDetection,
-  ): Promise<ResourceRecord[]>;
+  ): Promise<DiscoveryResult>;
   resolveEffective(
     context: ScanContext,
     resources: ResourceRecord[],

@@ -25,7 +25,8 @@ test("dashboard document exposes every Phase 3 view and keeps the design contrac
   assert.match(document, /id="kind-filter"/);
   assert.match(document, /id="state-filter"/);
   assert.match(document, /id="effective-provider"/);
-  assert.match(document, /id="working-directory"/);
+  assert.match(document, /<code id="working-directory">/);
+  assert.equal(document.includes('<select id="working-directory">'), false);
   assert.match(document, /id="copy-path"/);
   assert.match(document, /id="reveal-resource"/);
   assert.match(document, /id="open-resource"/);
@@ -53,6 +54,4 @@ test("dashboard renders scan values as text and authenticates every API request"
   assert.match(dashboardClientScript, /api\/resources\/.*\/path/);
   assert.match(dashboardClientScript, /api\/actions\/open/);
   assert.match(dashboardClientScript, /api\/actions\/reveal/);
-  assert.match(dashboardClientScript, /api\/actions\/select-working-directory/);
-  assert.match(dashboardClientScript, /workingDirectoryId/);
 });

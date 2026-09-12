@@ -27,6 +27,18 @@ export type ResourceState =
   | "invalid"
   | "unavailable";
 
+export type ResourceReach = "chain" | "repository";
+
+/**
+ * How a provider brings a resource into a session: instructions are loaded
+ * into context, skills are available on demand, and plugins or MCP servers
+ * must be explicitly enabled.
+ */
+export type ResourceLoadMode =
+  | "context-loaded"
+  | "on-demand"
+  | "explicitly-enabled";
+
 export type EvidenceType = "native" | "parsed" | "inferred";
 export type FindingSeverity = "info" | "warning" | "error";
 export type FindingConfidence = "low" | "medium" | "high";
@@ -50,6 +62,25 @@ export interface Finding {
   confidence: FindingConfidence;
   message: string;
   resourceId?: string;
+  /**
+   * Set to `repository` when the finding belongs to a resource found outside
+   * the selected directory's ancestor chain. Such findings keep their true
+   * severity but are left out of every default total.
+   */
+  reach?: ResourceReach;
+}
+
+/**
+ * An operational notice about the scan itself, such as a native inspection
+ * command that timed out. Notices describe scan completeness; they are never
+ * findings against the user's configuration and never count as errors.
+ */
+export interface ScanNotice {
+  code: string;
+  provider: ProviderId;
+  command: string;
+  message: string;
+  remediation: string;
 }
 
 export interface ResourceRecord {
@@ -63,6 +94,10 @@ export interface ResourceRecord {
   owner: ResourceOwner;
   path?: string;
   displayPath?: string;
+  reach?: ResourceReach;
+  loadMode?: ResourceLoadMode;
+  /** True for caches and provider runtime copies that the user does not author. */
+  generated?: boolean;
   state: ResourceState;
   precedence: Record<string, JsonValue>;
   evidenceType: EvidenceType;
@@ -94,6 +129,7 @@ export interface ScanSnapshot {
   detection: import("./provider-adapter.ts").ProviderDetection;
   effective: EffectiveConfiguration;
   findings: Finding[];
+  notices: ScanNotice[];
 }
 
 export type PublicResourceRecord = Omit<ResourceRecord, "path">;
@@ -111,6 +147,7 @@ export interface ScanReport {
     support: import("./provider-adapter.ts").ProviderDetection["support"];
     generation?: string;
     configRoots: string[];
+    complete: boolean;
   };
   resources: PublicResourceRecord[];
   effective: {
@@ -118,6 +155,7 @@ export interface ScanReport {
     decisions: EffectiveResource[];
   };
   findings: Finding[];
+  notices: ScanNotice[];
 }
 
 export interface AggregateFinding extends Finding {
@@ -138,4 +176,5 @@ export interface AggregateScanReport {
     }
   >;
   findings: AggregateFinding[];
+  notices: ScanNotice[];
 }

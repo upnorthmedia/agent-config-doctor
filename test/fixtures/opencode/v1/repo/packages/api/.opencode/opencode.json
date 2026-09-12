@@ -1,0 +1,1 @@
+{ "mcp": { "api-mcp": { "type": "remote", "url": "https://api.example.test/mcp" } } }

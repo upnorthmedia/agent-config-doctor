@@ -4,6 +4,7 @@ import path from "node:path";
 import { SCHEMA_VERSION } from "../core/schema.ts";
 import type {
   AdapterCapabilities,
+  DiscoveryResult,
   ProviderAdapter,
   ProviderDetection,
   ScanContext,
@@ -23,11 +24,14 @@ import {
   isDirectory,
   isFile,
   isRecord,
+  isWithin,
+  nativeNotice,
   parseSemanticVersion,
   parseSkillFrontmatter,
+  reachForDirectory,
   resourceId,
   runCommand,
-  runJsonCommand,
+  runNativeJson,
   stringArray,
   stringValue,
 } from "./shared.ts";
@@ -48,7 +52,7 @@ export class GrokAdapter implements ProviderAdapter {
 
   async detect(context: ScanContext): Promise<ProviderDetection> {
     const executablePath = context.executables?.grok ?? "grok";
-    const result = runCommand(executablePath, ["--version"], context, 2_000);
+    const result = await runCommand(executablePath, ["--version"], context, 2_000);
     const version = parseSemanticVersion(result.stdout);
     const installed = result.status === 0;
     const userRoot = path.join(context.homeDirectory, ".grok");
@@ -75,17 +79,41 @@ export class GrokAdapter implements ProviderAdapter {
   async discover(
     context: ScanContext,
     detection: ProviderDetection,
-  ): Promise<ResourceRecord[]> {
+  ): Promise<DiscoveryResult> {
     if (detection.support !== "supported") {
-      return [];
+      return { resources: [], notices: [] };
     }
-    const payload = runJsonCommand(
+    const outcome = await runNativeJson(
       detection.executablePath,
       ["inspect", "--json"],
       context,
     );
+    if (!outcome.ok) {
+      return {
+        resources: [],
+        notices: [
+          nativeNotice(
+            "grok",
+            "grok inspect --json",
+            outcome,
+            "All Grok Build evidence",
+          ),
+        ],
+      };
+    }
+    const payload = outcome.payload;
     if (!isRecord(payload)) {
-      return [];
+      return {
+        resources: [],
+        notices: [
+          nativeNotice(
+            "grok",
+            "grok inspect --json",
+            { ok: false, failure: "malformed-json", detail: "unexpected JSON shape" },
+            "All Grok Build evidence",
+          ),
+        ],
+      };
     }
     const pluginResources = await parsePlugins(payload, context, detection.version);
     const instructions = await parseInstructions(
@@ -106,9 +134,12 @@ export class GrokAdapter implements ProviderAdapter {
       pluginResources,
     );
 
-    return [...instructions, ...skills, ...pluginResources, ...mcps].sort(
-      compareResources,
-    );
+    return {
+      resources: [...instructions, ...skills, ...pluginResources, ...mcps].sort(
+        compareResources,
+      ),
+      notices: [],
+    };
   }
 
   async resolveEffective(
@@ -211,7 +242,7 @@ async function parseInstructions(
   ];
   const candidates = [
     ...userCandidates,
-    ...(await findNamedFiles(context.repositoryPath, INSTRUCTION_NAMES)),
+    ...(await findNamedFiles(context.repositoryPath, INSTRUCTION_NAMES, context)),
   ];
   const resources: ResourceRecord[] = [];
 
@@ -225,9 +256,9 @@ async function parseInstructions(
     const shownPath = displayPath(candidate, context);
     const compatibilityStatus = stringValue(raw?.compatibilityStatus);
     const vendor = stringValue(raw?.vendor);
-    const scope: ResourceScope = candidate.startsWith(context.homeDirectory)
-      ? "user"
-      : "project";
+    const scope: ResourceScope = isWithin(context.repositoryPath, candidate)
+      ? "project"
+      : "user";
     const active = native !== undefined && compatibilityStatus !== "disabled";
     const id = resourceId("grok", "instruction", shownPath);
     resources.push({
@@ -241,6 +272,10 @@ async function parseInstructions(
       owner: { type: "self" },
       path: await canonicalPath(candidate),
       displayPath: shownPath,
+      reach:
+        native || scope === "user"
+          ? "chain"
+          : reachForDirectory(path.dirname(candidate), context),
       state: active ? "active" : "inactive",
       precedence: native ? { nativeOrder: native.order } : {},
       evidenceType: native ? "native" : "parsed",
@@ -359,9 +394,12 @@ async function parseSkills(
     seenPaths.add(path.resolve(skillPath));
     const sourceType = stringValue(value.source.type) ?? "unknown";
     const pluginName = stringValue(value.source.plugin_name);
-    const owner = pluginName
-      ? ({ type: "plugin", id: pluginName } as const)
-      : ({ type: "self" } as const);
+    const bundled = sourceType === "bundled";
+    const owner: ResourceRecord["owner"] = pluginName
+      ? { type: "plugin", id: pluginName }
+      : bundled
+        ? { type: "provider", id: "grok" }
+        : { type: "self" };
     const pluginState = pluginName
       ? plugins.find((plugin) => plugin.name === pluginName)?.state
       : undefined;
@@ -375,11 +413,12 @@ async function parseSkills(
         provider: "grok",
         providerVersion,
         name,
-        scope: pluginName ? "bundled" : sourceType === "project" ? "project" : "user",
+        scope: pluginName || bundled ? "bundled" : sourceType === "project" ? "project" : "user",
         origin: pluginName ? "plugin" : sourceType,
         owner,
         path: await canonicalPath(skillPath),
         displayPath: shownPath,
+        ...(bundled ? { generated: true } : {}),
         state,
         precedence: {},
         evidenceType: "native",
@@ -418,7 +457,7 @@ async function parseSkills(
           provider: "grok",
           providerVersion,
           name,
-          scope: skillPath.startsWith(context.homeDirectory) ? "user" : "project",
+          scope: isWithin(context.repositoryPath, skillPath) ? "project" : "user",
           origin: compatible ? "compatibility" : "grok-native-path",
           owner: { type: "self" },
           path: await canonicalPath(skillPath),

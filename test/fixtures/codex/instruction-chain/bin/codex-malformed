@@ -1,0 +1,10 @@
+#!/usr/bin/env node
+
+// Reports a supported version, then answers native listings with output that
+// is not JSON.
+if (process.argv.includes("--version")) {
+  process.stdout.write("codex-cli 0.117.0-alpha.15\n");
+  process.exit(0);
+}
+process.stdout.write("{ not json\n");
+process.exit(0);

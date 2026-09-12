@@ -3,8 +3,13 @@ import path from "node:path";
 
 import type { ProviderAdapter, ScanContext } from "./provider-adapter.ts";
 import type {
+  EffectiveConfiguration,
+  Finding,
   JsonValue,
   PublicResourceRecord,
+  ResourceKind,
+  ResourceLoadMode,
+  ResourceRecord,
   ScanReport,
   ScanSnapshot,
 } from "./schema.ts";
@@ -14,22 +19,105 @@ export async function scanProvider(
   context: ScanContext,
 ): Promise<ScanSnapshot> {
   const detection = await adapter.detect(context);
-  const installed = await adapter.discover(context, detection);
-  const effective = await adapter.resolveEffective(
-    context,
-    installed,
-    detection,
+  const discovery = await adapter.discover(context, detection);
+  const effective = normalizeEffective(
+    await adapter.resolveEffective(context, discovery.resources, detection),
   );
   const findings = [
     ...detectionFindings(detection),
-    ...(await adapter.validate(context, effective.resources)),
+    ...scopeFindings(
+      await adapter.validate(context, effective.resources),
+      effective.resources,
+    ),
   ];
 
   return {
     detection,
     effective,
     findings,
+    notices: discovery.notices,
   };
+}
+
+const defaultLoadModes: Partial<Record<ResourceKind, ResourceLoadMode>> = {
+  instruction: "context-loaded",
+  skill: "on-demand",
+  plugin: "explicitly-enabled",
+  mcp: "explicitly-enabled",
+};
+
+/**
+ * Fills the optional classification fields every adapter shares and scopes
+ * the effective configuration to the selected directory's real ancestor
+ * chain. Resources discovered elsewhere in the repository stay in inventory
+ * with `reach: "repository"`, but they never become active and they are not
+ * part of the ordered chain or the effective decisions.
+ */
+function normalizeEffective(
+  effective: EffectiveConfiguration,
+): EffectiveConfiguration {
+  const resources = effective.resources.map((resource) => {
+    const reach = resource.reach ?? "chain";
+    const loadMode = resource.loadMode ?? defaultLoadModes[resource.kind];
+    return {
+      ...resource,
+      reach,
+      ...(loadMode ? { loadMode } : {}),
+      state:
+        reach === "repository" && resource.state === "active"
+          ? ("inactive" as const)
+          : resource.state,
+      findings:
+        reach === "repository"
+          ? resource.findings.map(offChainFinding)
+          : resource.findings,
+    };
+  });
+  const offChain = new Set(
+    resources
+      .filter((resource) => resource.reach === "repository")
+      .map((resource) => resource.id),
+  );
+
+  return {
+    ...effective,
+    resources,
+    orderedResourceIds: effective.orderedResourceIds.filter(
+      (id) => !offChain.has(id),
+    ),
+    decisions: effective.decisions.filter(
+      (decision) => !offChain.has(decision.resourceId),
+    ),
+  };
+}
+
+/**
+ * Findings mirror the reach of the resource they belong to. A finding on an
+ * off-chain resource keeps its severity (a broken import is still broken in
+ * that file) but carries `reach: "repository"` so default totals can skip it.
+ */
+function scopeFindings(
+  findings: Finding[],
+  resources: ResourceRecord[],
+): Finding[] {
+  const offChain = new Set(
+    resources
+      .filter((resource) => resource.reach === "repository")
+      .map((resource) => resource.id),
+  );
+  return findings.map((finding) =>
+    finding.resourceId && offChain.has(finding.resourceId)
+      ? offChainFinding(finding)
+      : finding,
+  );
+}
+
+function offChainFinding(finding: Finding): Finding {
+  return { ...finding, reach: "repository" };
+}
+
+export function isInContext(finding: Pick<Finding, "reach">): boolean {
+  return finding.reach !== "repository";
 }
 
 function detectionFindings(
@@ -41,7 +129,7 @@ function detectionFindings(
         code: "provider.version.unsupported",
         severity: "warning",
         confidence: "high",
-        message: `The installed ${detection.provider} version (${detection.version}) is not supported by this adapter.`,
+        message: `The installed ${detection.provider} version (${detection.version}) is not supported by this adapter.${detection.supportNote ? ` ${detection.supportNote}` : ""}`,
       },
     ];
   }
@@ -90,6 +178,7 @@ export function createScanReport(
       configRoots: snapshot.detection.configRoots.map((root) =>
         redactPath(root, context),
       ),
+      complete: snapshot.notices.length === 0,
     },
     resources,
     effective: {
@@ -104,6 +193,9 @@ export function createScanReport(
       `${left.code}:${left.resourceId ?? ""}:${left.message}`.localeCompare(
         `${right.code}:${right.resourceId ?? ""}:${right.message}`,
       ),
+    ),
+    notices: [...snapshot.notices].sort((left, right) =>
+      `${left.code}:${left.command}`.localeCompare(`${right.code}:${right.command}`),
     ),
   };
 

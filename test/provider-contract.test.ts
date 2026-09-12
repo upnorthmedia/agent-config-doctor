@@ -27,7 +27,7 @@ function providerCases(): Array<{
   const claude = path.join(testRoot, "fixtures", "claude", "provider");
   const codex = path.join(testRoot, "fixtures", "codex", "instruction-chain");
   const grok = path.join(testRoot, "fixtures", "grok", "provider");
-  const opencode = path.join(testRoot, "fixtures", "opencode", "provider");
+  const opencode = path.join(testRoot, "fixtures", "opencode", "v1");
   const hermes = path.join(testRoot, "fixtures", "hermes", "provider");
   const claudeRepo = path.join(claude, "repo");
   const codexRepo = path.join(codex, "repo");

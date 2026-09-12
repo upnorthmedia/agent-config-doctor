@@ -5,6 +5,7 @@ import path from "node:path";
 import { SCHEMA_VERSION } from "../core/schema.ts";
 import type {
   AdapterCapabilities,
+  DiscoveryResult,
   ProviderAdapter,
   ProviderDetection,
   ScanContext,
@@ -27,6 +28,7 @@ import {
   isFile,
   isRecord,
   parseSkillFrontmatter,
+  reachForDirectory,
   readJsonFile,
   readYamlFile,
   resourceId,
@@ -34,6 +36,7 @@ import {
   sanitizeTransport,
   stringArray,
   stringValue,
+  walkFiles,
 } from "./shared.ts";
 
 const CONTEXT_NAMES = new Set([
@@ -60,7 +63,7 @@ export class HermesAdapter implements ProviderAdapter {
 
   async detect(context: ScanContext): Promise<ProviderDetection> {
     const executablePath = context.executables?.hermes ?? "hermes";
-    const result = runCommand(executablePath, ["--version"], context, 2_000);
+    const result = await runCommand(executablePath, ["--version"], context, 2_000);
     const version = parseHermesVersion(result.stdout);
     const installed = result.status === 0;
     const hermesHome = getHermesHome(context);
@@ -87,9 +90,9 @@ export class HermesAdapter implements ProviderAdapter {
   async discover(
     context: ScanContext,
     detection: ProviderDetection,
-  ): Promise<ResourceRecord[]> {
+  ): Promise<DiscoveryResult> {
     if (detection.support !== "supported") {
-      return [];
+      return { resources: [], notices: [] };
     }
 
     const hermesHome = getHermesHome(context);
@@ -103,7 +106,7 @@ export class HermesAdapter implements ProviderAdapter {
       parsedConfig,
     );
 
-    return [
+    const resources = [
       ...(await discoverInstructions(context, detection.version, hermesHome)),
       ...(await discoverSkills(
         context,
@@ -120,6 +123,7 @@ export class HermesAdapter implements ProviderAdapter {
         parsedConfig,
       )),
     ].sort(compareResources);
+    return { resources, notices: [] };
   }
 
   async resolveEffective(
@@ -263,8 +267,8 @@ async function discoverInstructions(
 ): Promise<ResourceRecord[]> {
   const candidates = [
     path.join(hermesHome, "SOUL.md"),
-    ...(await findNamedFiles(context.repositoryPath, CONTEXT_NAMES)),
-    ...(await findCursorRules(context.repositoryPath)),
+    ...(await findNamedFiles(context.repositoryPath, CONTEXT_NAMES, context)),
+    ...(await findCursorRules(context.repositoryPath, context)),
   ];
   const resources: ResourceRecord[] = [];
 
@@ -275,6 +279,11 @@ async function discoverInstructions(
     const isSoul = path.resolve(candidate) === path.join(hermesHome, "SOUL.md");
     const shownPath = displayPath(candidate, context, [["$HERMES_HOME", hermesHome]]);
     const id = resourceId("hermes", "instruction", shownPath);
+    // Cursor rules live in <project>/.cursor/rules, so the project directory
+    // that owns them decides whether they sit in the selected chain.
+    const ownerDirectory = candidate.endsWith(".mdc")
+      ? path.dirname(path.dirname(path.dirname(candidate)))
+      : path.dirname(candidate);
     resources.push({
       id,
       kind: "instruction",
@@ -290,6 +299,7 @@ async function discoverInstructions(
       owner: { type: "self" },
       path: await canonicalPath(candidate),
       displayPath: shownPath,
+      reach: isSoul ? "chain" : reachForDirectory(ownerDirectory, context),
       state: "inactive",
       precedence: {},
       evidenceType: "parsed",
@@ -306,36 +316,15 @@ async function discoverInstructions(
   return resources;
 }
 
-async function findCursorRules(root: string): Promise<string[]> {
-  const files: string[] = [];
-
-  async function walk(directory: string): Promise<void> {
-    let entries;
-    try {
-      entries = await readdir(directory, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      if (entry.name === ".git" || entry.name === "node_modules") {
-        continue;
-      }
-      const candidate = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
-        await walk(candidate);
-      } else if (
-        entry.isFile() &&
-        entry.name.endsWith(".mdc") &&
-        path.basename(path.dirname(candidate)) === "rules" &&
-        path.basename(path.dirname(path.dirname(candidate))) === ".cursor"
-      ) {
-        files.push(candidate);
-      }
-    }
-  }
-
-  await walk(root);
-  return files.sort();
+function findCursorRules(root: string, context: ScanContext): Promise<string[]> {
+  return walkFiles(
+    root,
+    (name, candidate) =>
+      name.endsWith(".mdc") &&
+      path.basename(path.dirname(candidate)) === "rules" &&
+      path.basename(path.dirname(path.dirname(candidate))) === ".cursor",
+    context,
+  );
 }
 
 function contextPriority(name: string): number {
@@ -438,6 +427,13 @@ async function discoverSkills(
         name,
         scope: origin === "hermes-local" ? "user" : "bundled",
         origin,
+        // Hermes ships bundled skills and keeps a protected copy when the user
+        // edits one, so both stay under Hermes ownership. Only the untouched
+        // bundled copy is a generated runtime file.
+        ...(originHash !== undefined
+          ? { owner: { type: "provider" as const, id: "hermes" } }
+          : {}),
+        ...(origin === "hermes-bundled" ? { generated: true } : {}),
         state: parsed.error ? "invalid" : "active",
         metadata,
         ...(parsed.error ? { error: parsed.error } : {}),
@@ -486,6 +482,8 @@ async function createSkillResource(options: {
   name: string;
   scope: ResourceScope;
   origin: string;
+  owner?: ResourceRecord["owner"];
+  generated?: boolean;
   state: ResourceState;
   metadata: Record<string, JsonValue>;
   error?: string;
@@ -505,9 +503,10 @@ async function createSkillResource(options: {
     name: options.name,
     scope: options.scope,
     origin: options.origin,
-    owner: { type: "self" },
+    owner: options.owner ?? { type: "self" },
     path: await canonicalPath(options.skillPath),
     displayPath: shownPath,
+    ...(options.generated ? { generated: true } : {}),
     state: options.state,
     precedence: {},
     evidenceType: "parsed",

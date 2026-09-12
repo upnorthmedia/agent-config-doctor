@@ -4,6 +4,7 @@ import path from "node:path";
 import { SCHEMA_VERSION } from "../core/schema.ts";
 import type {
   AdapterCapabilities,
+  DiscoveryResult,
   ProviderAdapter,
   ProviderDetection,
   ScanContext,
@@ -14,6 +15,7 @@ import type {
   ResourceRecord,
   ResourceScope,
   ResourceState,
+  ScanNotice,
 } from "../core/schema.ts";
 import {
   canonicalPath,
@@ -24,12 +26,14 @@ import {
   isDirectory,
   isFile,
   isRecord,
+  nativeNotice,
   parseSemanticVersion,
   parseSkillFrontmatter,
+  reachForDirectory,
   readJsonFile,
   resourceId,
   runCommand,
-  runJsonCommand,
+  runNativeJson,
   sanitizeTransport,
   stringArray,
   stringValue,
@@ -46,7 +50,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 
   async detect(context: ScanContext): Promise<ProviderDetection> {
     const executablePath = context.executables?.claude ?? "claude";
-    const result = runCommand(executablePath, ["--version"], context, 2_000);
+    const result = await runCommand(executablePath, ["--version"], context, 2_000);
     const version = parseSemanticVersion(result.stdout);
     const installed = result.status === 0;
     const adminRoot = context.adminRoots?.claude ?? defaultAdminRoot();
@@ -74,10 +78,11 @@ export class ClaudeAdapter implements ProviderAdapter {
   async discover(
     context: ScanContext,
     detection: ProviderDetection,
-  ): Promise<ResourceRecord[]> {
+  ): Promise<DiscoveryResult> {
     if (detection.support !== "supported") {
-      return [];
+      return { resources: [], notices: [] };
     }
+    const notices: ScanNotice[] = [];
     const adminRoot = context.adminRoots?.claude ?? defaultAdminRoot();
     const userRoot = path.join(context.homeDirectory, ".claude");
     const roots = claudeDisplayRoots(adminRoot);
@@ -95,14 +100,17 @@ export class ClaudeAdapter implements ProviderAdapter {
       userRoot,
       roots,
     );
-    const plugins = await discoverPlugins(context, detection, roots);
+    const plugins = await discoverPlugins(context, detection, roots, notices);
     const mcps = await discoverMcpServers(
       context,
       detection.version,
       roots,
     );
 
-    return [...instructions, ...skills, ...plugins, ...mcps].sort(compareResources);
+    return {
+      resources: [...instructions, ...skills, ...plugins, ...mcps].sort(compareResources),
+      notices,
+    };
   }
 
   async resolveEffective(
@@ -240,7 +248,7 @@ async function discoverInstructions(
   const candidates = [
     path.join(adminRoot, "CLAUDE.md"),
     path.join(userRoot, "CLAUDE.md"),
-    ...(await findNamedFiles(context.repositoryPath, INSTRUCTION_NAMES)),
+    ...(await findNamedFiles(context.repositoryPath, INSTRUCTION_NAMES, context)),
   ];
   const resources: ResourceRecord[] = [];
 
@@ -314,6 +322,7 @@ async function createInstructionResource(
     owner: inAdmin ? { type: "administrator" } : { type: "self" },
     path: await canonicalPath(candidate),
     displayPath: shownPath,
+    reach: inAdmin || inUser ? "chain" : reachForDirectory(loadDirectory, context),
     state: "inactive",
     precedence: {},
     evidenceType: "parsed",
@@ -361,6 +370,7 @@ async function discoverImports(
         origin: "instruction-import",
         owner: parent.owner,
         displayPath: shownPath,
+        ...(parent.reach ? { reach: parent.reach } : {}),
         state: "unavailable",
         precedence: {},
         evidenceType: "parsed",
@@ -400,6 +410,7 @@ async function discoverImports(
       owner: parent.owner,
       path: canonical,
       displayPath: shownPath,
+      ...(parent.reach ? { reach: parent.reach } : {}),
       state: "inactive",
       precedence: {},
       evidenceType: "parsed",
@@ -463,6 +474,7 @@ async function discoverSkills(
     rank: number;
     eligible: boolean;
     owner: ResourceRecord["owner"];
+    reach?: ResourceRecord["reach"];
   }> = [];
 
   for (const skillPath of await findSkillFiles(path.join(adminRoot, "skills"))) {
@@ -485,7 +497,7 @@ async function discoverSkills(
       owner: { type: "self" },
     });
   }
-  for (const skillPath of await findSkillFiles(context.repositoryPath)) {
+  for (const skillPath of await findSkillFiles(context.repositoryPath, context)) {
     const scopeDirectory = claudeSkillScopeDirectory(skillPath);
     if (!scopeDirectory) {
       continue;
@@ -498,6 +510,7 @@ async function discoverSkills(
       rank: 100 + Math.max(depth, 0),
       eligible: depth >= 0,
       owner: { type: "self" },
+      reach: reachForDirectory(scopeDirectory, context),
     });
   }
 
@@ -512,6 +525,7 @@ async function discoverSkills(
         location.origin,
         location.owner,
         location.eligible ? "active" : "inactive",
+        location.reach,
       ),
       rank: location.rank,
       eligible: location.eligible,
@@ -536,6 +550,8 @@ async function createSkillResource(
   origin: string,
   owner: ResourceRecord["owner"],
   state: ResourceState,
+  reach?: ResourceRecord["reach"],
+  generated?: boolean,
 ): Promise<ResourceRecord> {
   const contents = await readFile(skillPath, "utf8");
   const parsed = parseSkillFrontmatter(contents);
@@ -565,6 +581,8 @@ async function createSkillResource(
     owner,
     path: await canonicalPath(skillPath),
     displayPath: shownPath,
+    ...(reach ? { reach } : {}),
+    ...(generated ? { generated } : {}),
     state: findings.length > 0 ? "invalid" : state,
     precedence: {},
     evidenceType: "parsed",
@@ -581,13 +599,34 @@ async function discoverPlugins(
   context: ScanContext,
   detection: ProviderDetection,
   roots: ReadonlyArray<readonly [string, string]>,
+  notices: ScanNotice[],
 ): Promise<ResourceRecord[]> {
-  const payload = runJsonCommand(
+  const outcome = await runNativeJson(
     detection.executablePath,
     ["plugin", "list", "--json"],
     context,
   );
+  if (!outcome.ok) {
+    notices.push(
+      nativeNotice(
+        "claude",
+        "claude plugin list --json",
+        outcome,
+        "Claude Code plugin evidence",
+      ),
+    );
+    return [];
+  }
+  const payload = outcome.payload;
   if (!Array.isArray(payload)) {
+    notices.push(
+      nativeNotice(
+        "claude",
+        "claude plugin list --json",
+        { ok: false, failure: "malformed-json", detail: "unexpected JSON shape" },
+        "Claude Code plugin evidence",
+      ),
+    );
     return [];
   }
   const rows: Array<{
@@ -621,6 +660,7 @@ async function discoverPlugins(
       owner: scope === "managed" ? { type: "administrator" } : { type: "self" },
       path: await canonicalPath(installPath),
       displayPath: shownPath,
+      generated: true,
       state,
       precedence: {},
       evidenceType: "native",
@@ -646,6 +686,8 @@ async function discoverPlugins(
           "plugin",
           { type: "plugin", id: pluginId },
           state,
+          undefined,
+          true,
         ),
       );
     }
@@ -670,6 +712,7 @@ async function discoverPlugins(
         owner: { type: "plugin", id: pluginId },
         path: await canonicalPath(installPath),
         displayPath: shownPath,
+        generated: true,
         state,
         precedence: {},
         evidenceType: "native",

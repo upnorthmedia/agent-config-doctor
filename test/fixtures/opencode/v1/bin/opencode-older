@@ -1,0 +1,8 @@
+#!/usr/bin/env node
+
+if (process.argv.includes("--version") || process.argv.includes("-v")) {
+  process.stdout.write("1.17.4\n");
+  process.exit(0);
+}
+
+process.exit(2);

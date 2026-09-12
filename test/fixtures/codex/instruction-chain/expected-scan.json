@@ -109,7 +109,7 @@
       "path": "$CODEX_HOME/plugins/cache/test-market/disabled-plugin/2.0.0",
       "scope": "user",
       "origin": "marketplace:test-market",
-      "owner": "self",
+      "owner": "provider:codex",
       "state": "disabled",
       "evidence": "native:command:codex plugin list --json"
     },
@@ -119,9 +119,19 @@
       "path": "$CODEX_HOME/plugins/cache/test-market/fixture-plugin/1.2.3",
       "scope": "user",
       "origin": "marketplace:test-market",
-      "owner": "self",
+      "owner": "provider:codex",
       "state": "active",
       "evidence": "native:command:codex plugin list --json"
+    },
+    {
+      "kind": "skill",
+      "name": "Plugin Mismatch",
+      "path": "$CODEX_HOME/plugins/cache/test-market/fixture-plugin/1.2.3/skills/plugin-mismatch/SKILL.md",
+      "scope": "bundled",
+      "origin": "plugin",
+      "owner": "plugin:fixture-plugin@test-market",
+      "state": "active",
+      "evidence": "parsed:file:$CODEX_HOME/plugins/cache/test-market/fixture-plugin/1.2.3/skills/plugin-mismatch/SKILL.md"
     },
     {
       "kind": "skill",
@@ -132,6 +142,16 @@
       "owner": "plugin:fixture-plugin@test-market",
       "state": "active",
       "evidence": "parsed:file:$CODEX_HOME/plugins/cache/test-market/fixture-plugin/1.2.3/skills/plugin-skill/SKILL.md"
+    },
+    {
+      "kind": "skill",
+      "name": "system-skill",
+      "path": "$CODEX_HOME/skills/.system/system-skill/SKILL.md",
+      "scope": "bundled",
+      "origin": "codex-system",
+      "owner": "provider:codex",
+      "state": "active",
+      "evidence": "parsed:file:$CODEX_HOME/skills/.system/system-skill/SKILL.md"
     },
     {
       "kind": "skill",
@@ -191,7 +211,7 @@
       "scope": "project",
       "origin": "agents-repository",
       "owner": "self",
-      "state": "invalid",
+      "state": "active",
       "evidence": "parsed:file:$REPO/packages/api/.agents/skills/mismatched-directory/SKILL.md"
     },
     {
@@ -206,6 +226,7 @@
     }
   ],
   "findingCodes": [
+    "codex.skill.name-directory-mismatch",
     "codex.skill.name-directory-mismatch"
   ]
 }
