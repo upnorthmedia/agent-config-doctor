@@ -264,10 +264,9 @@ export const GENERATED_DIRECTORY_NAMES: ReadonlySet<string> = new Set([
  * linked trees cannot create cycles or reach outside the walked root.
  *
  * When a scan context is given, a directory on the selected working
- * directory's ancestor chain is always entered, even when its name is in the
- * generated list: the exclusions prune off-chain subtrees, never the chain.
- * Inside such a directory only the chain itself is followed, so its other
- * generated content stays out of inventory.
+ * directory's ancestor chain is always entered and walked normally, even when
+ * its name is in the generated list: the exclusions prune only off-chain
+ * subtrees, never the chain or the configuration that lives beside it.
  */
 export async function walkFiles(
   root: string,
@@ -279,14 +278,13 @@ export async function walkFiles(
       ? directoriesFromRoot(context.repositoryPath, context.workingDirectory)
       : [],
   );
-  return walkTree(root, accept, chain, false);
+  return walkTree(root, accept, chain);
 }
 
 async function walkTree(
   root: string,
   accept: (name: string, candidate: string) => boolean,
   chain: ReadonlySet<string>,
-  chainOnly: boolean,
 ): Promise<string[]> {
   let entries;
   try {
@@ -298,13 +296,14 @@ async function walkTree(
 
   for (const entry of entries) {
     const candidate = path.join(root, entry.name);
-    const generated = GENERATED_DIRECTORY_NAMES.has(entry.name);
-    const onChain = chain.has(path.resolve(candidate));
     if (entry.isDirectory()) {
-      if ((generated || chainOnly) && !onChain) {
+      if (
+        GENERATED_DIRECTORY_NAMES.has(entry.name) &&
+        !chain.has(path.resolve(candidate))
+      ) {
         continue;
       }
-      files.push(...(await walkTree(candidate, accept, chain, generated)));
+      files.push(...(await walkTree(candidate, accept, chain)));
     } else if (
       (entry.isFile() || entry.isSymbolicLink()) &&
       accept(entry.name, candidate)

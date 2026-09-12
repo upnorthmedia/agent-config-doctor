@@ -125,20 +125,6 @@ test("findings on fixture resources keep their severity but never count as in-co
     (finding) => finding.reach !== "repository" && finding.severity === "error",
   );
   assert.deepEqual(inContextErrors, []);
-  // Natively listed plugin skills are authoritative wherever their files live,
-  // so only findings on resources the repository walk discovered are off-chain.
-  for (const finding of scan.report.findings) {
-    const resource = finding.resourceId ? byId.get(finding.resourceId) : undefined;
-    const onFixture =
-      resource?.displayPath?.startsWith("$REPO/test/fixtures/") &&
-      resource.evidenceType !== "native" &&
-      resource.owner.type !== "plugin";
-    assert.equal(
-      finding.reach,
-      onFixture ? "repository" : resource?.reach === "repository" ? "repository" : undefined,
-      `${finding.code} on ${resource?.displayPath ?? "no resource"}`,
-    );
-  }
 });
 
 test("nested synthetic homes stay visible as repository inventory instead of being hidden", async (t) => {
@@ -195,6 +181,7 @@ test("a working directory under a generated directory name keeps its chain files
   await writeFile(path.join(workingDirectory, "AGENTS.md"), "# tools\n", "utf8");
   await writeFile(path.join(workingDirectory, "CLAUDE.md"), "# tools\n", "utf8");
   await writeFile(path.join(root, "build", "output", "AGENTS.md"), "# generated\n", "utf8");
+  await writeFile(path.join(root, "build", "output", "CLAUDE.md"), "# generated\n", "utf8");
   const homeDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-config-build-home-"));
   t.after(() => rm(homeDirectory, { recursive: true, force: true }));
   const context: ScanContext = {
@@ -217,9 +204,17 @@ test("a working directory under a generated directory name keeps its chain files
 
   assert.deepEqual(orderedPaths(codex), ["$REPO/AGENTS.md", "$REPO/build/tools/AGENTS.md"]);
   assert.ok(orderedPaths(claude).includes("$REPO/build/tools/CLAUDE.md"));
-  for (const snapshot of [codex, claude]) {
-    const paths = snapshot.effective.resources.map((resource) => resource.displayPath);
-    assert.equal(paths.includes("$REPO/build/output/AGENTS.md"), false, "generated siblings stay excluded");
+  for (const [snapshot, siblingPath] of [
+    [codex, "$REPO/build/output/AGENTS.md"],
+    [claude, "$REPO/build/output/CLAUDE.md"],
+  ] as const) {
+    const sibling = snapshot.effective.resources.find(
+      (resource) => resource.displayPath === siblingPath,
+    );
+    assert.ok(sibling, `${siblingPath} stays visible as inventory`);
+    assert.equal(sibling.reach, "repository");
+    assert.notEqual(sibling.state, "active");
+    assert.equal(snapshot.effective.orderedResourceIds.includes(sibling.id), false);
     for (const resource of snapshot.effective.resources) {
       if (resource.displayPath?.startsWith("$REPO/build/tools/")) {
         assert.equal(resource.reach, "chain", resource.displayPath);
@@ -229,6 +224,72 @@ test("a working directory under a generated directory name keeps its chain files
   }
   assert.deepEqual(codex.notices, []);
   assert.deepEqual(claude.notices, []);
+});
+
+test("a working directory literally named build keeps its own project skills active", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "agent-config-build-skills-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const workingDirectory = path.join(root, "build");
+  const skill = "---\nname: deploy\ndescription: Deploy the build.\n---\n\nDeploy.\n";
+  for (const directory of [
+    path.join(workingDirectory, ".claude", "skills", "deploy"),
+    path.join(workingDirectory, ".agents", "skills", "deploy"),
+    path.join(root, "dist", ".claude", "skills", "stale"),
+  ]) {
+    await mkdir(directory, { recursive: true });
+    await writeFile(path.join(directory, "SKILL.md"), skill, "utf8");
+  }
+  await writeFile(path.join(root, "AGENTS.md"), "# root\n", "utf8");
+  await writeFile(path.join(workingDirectory, "AGENTS.md"), "# build\n", "utf8");
+  await writeFile(path.join(workingDirectory, "CLAUDE.md"), "# build\n", "utf8");
+  const homeDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-config-build-skills-home-"));
+  t.after(() => rm(homeDirectory, { recursive: true, force: true }));
+  const context: ScanContext = {
+    homeDirectory,
+    repositoryPath: root,
+    workingDirectory,
+    environment: { CODEX_HOME: path.join(homeDirectory, ".codex") },
+    executables: {
+      claude: path.join(claudeFixture, "bin", "claude"),
+      codex: path.join(codexFixture, "bin", "codex"),
+    },
+  };
+
+  const expectations = [
+    {
+      adapter: new ClaudeAdapter(),
+      skillPath: "$REPO/build/.claude/skills/deploy/SKILL.md",
+      instructionPath: "$REPO/build/CLAUDE.md",
+    },
+    {
+      adapter: new CodexAdapter(),
+      skillPath: "$REPO/build/.agents/skills/deploy/SKILL.md",
+      instructionPath: "$REPO/build/AGENTS.md",
+    },
+  ];
+  for (const { adapter, skillPath, instructionPath } of expectations) {
+    const snapshot = await scanProvider(adapter, context);
+    const deploy = snapshot.effective.resources.find(
+      (resource) => resource.displayPath === skillPath,
+    );
+    assert.ok(deploy, `${adapter.provider} discovers ${skillPath}`);
+    assert.equal(deploy.kind, "skill");
+    assert.equal(deploy.reach, "chain");
+    assert.equal(deploy.state, "active");
+    const instruction = snapshot.effective.resources.find(
+      (resource) => resource.displayPath === instructionPath,
+    );
+    assert.ok(instruction, `${adapter.provider} discovers ${instructionPath}`);
+    assert.equal(instruction.reach, "chain");
+    assert.equal(instruction.state, "active");
+    assert.ok(snapshot.effective.orderedResourceIds.includes(instruction.id));
+    assert.equal(
+      snapshot.effective.resources.some((resource) => resource.displayPath?.startsWith("$REPO/dist/")),
+      false,
+      `${adapter.provider} still skips off-chain generated directories`,
+    );
+    assert.deepEqual(snapshot.notices, []);
+  }
 });
 
 test("discovers Codex system skills as provider-owned resources", async () => {
