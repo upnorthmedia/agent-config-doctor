@@ -235,9 +235,10 @@ export async function readYamlFile(candidate: string): Promise<unknown> {
 }
 
 /**
- * Directory names that the repository walker never descends into. They hold
- * version-control internals, dependency trees, or build output that no
- * supported provider reads configuration from.
+ * Directory names that the repository walker prunes off the ancestor chain.
+ * They hold version-control internals, dependency trees, or build output that
+ * no supported provider reads configuration from. See `walkFiles` for the
+ * on-chain exception.
  */
 export const GENERATED_DIRECTORY_NAMES: ReadonlySet<string> = new Set([
   ".git",

@@ -66,7 +66,7 @@ The command writes only schema-versioned JSON to stdout. Status, errors, and sca
 
 Effective configuration is built only from the selected directory and its real ancestor chain up to the repository root, plus the provider's user, administrator, and provider-managed locations. The whole repository is still walked so that every instruction file, skill, plugin, and MCP definition stays visible, but a file found outside that chain (a sibling package, a test fixture, a nested synthetic home directory) is reported with `reach: "repository"`, is never active, and is left out of the overview totals. The dashboard lists those resources under "Elsewhere in repository" and the `doctor` summary counts them separately.
 
-The repository walk skips version-control and generated directories: `.git`, `.hg`, `.svn`, `node_modules`, `dist`, `build`, `coverage`, `.venv`, `venv`, `__pycache__`, `.cache`, `.next`, `.turbo`, `.tox`, `.mypy_cache`, and `.pytest_cache`. Directory symlinks are not followed.
+The repository walk skips version-control and generated directories: `.git`, `.hg`, `.svn`, `node_modules`, `dist`, `build`, `coverage`, `.venv`, `venv`, `__pycache__`, `.cache`, `.next`, `.turbo`, `.tox`, `.mypy_cache`, and `.pytest_cache`. A directory with one of those names is still walked when it lies on the selected directory's ancestor chain, so launching from inside such a directory never hides the configuration beside it. Directory symlinks are not followed.
 
 ### Doctor summary
 
