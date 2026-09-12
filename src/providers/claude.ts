@@ -248,7 +248,7 @@ async function discoverInstructions(
   const candidates = [
     path.join(adminRoot, "CLAUDE.md"),
     path.join(userRoot, "CLAUDE.md"),
-    ...(await findNamedFiles(context.repositoryPath, INSTRUCTION_NAMES)),
+    ...(await findNamedFiles(context.repositoryPath, INSTRUCTION_NAMES, context)),
   ];
   const resources: ResourceRecord[] = [];
 
@@ -497,7 +497,7 @@ async function discoverSkills(
       owner: { type: "self" },
     });
   }
-  for (const skillPath of await findSkillFiles(context.repositoryPath)) {
+  for (const skillPath of await findSkillFiles(context.repositoryPath, context)) {
     const scopeDirectory = claudeSkillScopeDirectory(skillPath);
     if (!scopeDirectory) {
       continue;

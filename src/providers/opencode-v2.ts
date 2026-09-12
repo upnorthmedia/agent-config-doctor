@@ -179,7 +179,7 @@ async function discoverInstructions(
 ): Promise<ResourceRecord[]> {
   const paths = [
     path.join(userRoot, "AGENTS.md"),
-    ...(await findNamedFiles(context.repositoryPath, new Set(["AGENTS.md"]))),
+    ...(await findNamedFiles(context.repositoryPath, new Set(["AGENTS.md"]), context)),
   ];
   const resources: ResourceRecord[] = [];
   for (const candidate of paths) {
@@ -287,7 +287,7 @@ async function discoverSkills(
     }
   }
 
-  for (const skillPath of await findSkillFiles(context.repositoryPath)) {
+  for (const skillPath of await findSkillFiles(context.repositoryPath, context)) {
     const source = opencodeProjectSkillSource(skillPath);
     if (!source) {
       continue;

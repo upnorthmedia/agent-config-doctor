@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import type { CoordinatedScan } from "./core/coordinator.ts";
 import { scanPath } from "./core/runtime.ts";
+import { isInContext } from "./core/scanner.ts";
 import { detectGuiEditors, selectGuiEditor } from "./server/actions.ts";
 import { startDashboardServer } from "./server/server.ts";
 
@@ -79,8 +80,13 @@ function writeDoctorSummary(scan: CoordinatedScan): void {
   const detected = scan.report.providers.filter((provider) => provider.installed).length;
   const unavailable = scan.report.providers.length - detected;
   const counts = { error: 0, warning: 0, info: 0 };
+  let elsewhereFindings = 0;
   for (const finding of scan.report.findings) {
-    counts[finding.severity] += 1;
+    if (isInContext(finding)) {
+      counts[finding.severity] += 1;
+    } else {
+      elsewhereFindings += 1;
+    }
   }
   const elsewhere = scan.report.resources.filter(
     (resource) => resource.reach === "repository",
@@ -93,7 +99,7 @@ function writeDoctorSummary(scan: CoordinatedScan): void {
       "",
       `Providers: ${detected} detected, ${unavailable} unavailable`,
       `Resources: ${installed} installed, ${elsewhere} elsewhere in repository`,
-      `Findings: ${formatCount(counts.error, "error")}, ${formatCount(counts.warning, "warning")}, ${counts.info} info`,
+      `Findings: ${formatCount(counts.error, "error")}, ${formatCount(counts.warning, "warning")}, ${counts.info} info${elsewhereFindings > 0 ? ` (${elsewhereFindings} more elsewhere in repository)` : ""}`,
       `Scan: ${scan.report.notices.length === 0 ? "complete" : `incomplete, ${formatCount(scan.report.notices.length, "notice")}`}`,
       "",
     ].join("\n"),

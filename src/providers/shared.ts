@@ -22,10 +22,15 @@ import type {
  */
 export const NATIVE_COMMAND_TIMEOUT_MS = 15_000;
 
+/** Largest native listing the scan reads before giving up on the command. */
+export const NATIVE_COMMAND_MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
+
 export interface CommandResult {
   status: number | null;
   stdout: string;
   timedOut: boolean;
+  /** Set when the command wrote more than the scan reads. */
+  outputTooLarge?: boolean;
   /** Set when the process could not be started at all. */
   spawnError?: string;
 }
@@ -46,7 +51,7 @@ export function runCommand(
         env: { ...process.env, ...context.environment },
         timeout,
         killSignal: "SIGKILL",
-        maxBuffer: 10 * 1024 * 1024,
+        maxBuffer: NATIVE_COMMAND_MAX_OUTPUT_BYTES,
       },
       (error, stdout) => {
         const output = typeof stdout === "string" ? stdout : "";
@@ -58,6 +63,15 @@ export function runCommand(
           killed?: boolean;
           signal?: NodeJS.Signals | null;
         };
+        if (failure.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
+          resolve({
+            status: null,
+            stdout: output,
+            timedOut: false,
+            outputTooLarge: true,
+          });
+          return;
+        }
         if (typeof failure.code === "string") {
           resolve({
             status: null,
@@ -81,6 +95,7 @@ export type NativeFailure =
   | "timeout"
   | "nonzero-exit"
   | "malformed-json"
+  | "oversized-output"
   | "unavailable";
 
 export type NativeJsonOutcome =
@@ -111,6 +126,13 @@ export async function runNativeJson(
       detail: `no result within ${formatSeconds(timeout)}`,
     };
   }
+  if (result.outputTooLarge) {
+    return {
+      ok: false,
+      failure: "oversized-output",
+      detail: `output exceeded ${formatMegabytes(NATIVE_COMMAND_MAX_OUTPUT_BYTES)}`,
+    };
+  }
   if (result.status !== 0) {
     return {
       ok: false,
@@ -136,12 +158,14 @@ export function nativeNotice(
     timeout: `"${command}" timed out (${outcome.detail}). ${evidence} from this scan is incomplete.`,
     "nonzero-exit": `"${command}" failed (${outcome.detail}). ${evidence} from this scan is incomplete.`,
     "malformed-json": `"${command}" returned output that could not be parsed (${outcome.detail}). ${evidence} from this scan is incomplete.`,
+    "oversized-output": `"${command}" returned more output than the scan reads (${outcome.detail}). ${evidence} from this scan is incomplete.`,
     unavailable: `"${command}" could not be started (${outcome.detail}). ${evidence} from this scan is incomplete.`,
   };
   const remediations: Record<NativeFailure, string> = {
     timeout: `Rerun the scan (agent-config-doctor scan <path> --json, or relaunch the dashboard). A cold ${label} start can exceed the budget; confirm "${command}" completes in a terminal.`,
     "nonzero-exit": `Run "${command}" in a terminal to see the ${label} error, then rerun the scan.`,
     "malformed-json": `Run "${command}" in a terminal and check its output, then rerun the scan.`,
+    "oversized-output": `Run "${command}" in a terminal and check why its output exceeds ${formatMegabytes(NATIVE_COMMAND_MAX_OUTPUT_BYTES)}, then rerun the scan.`,
     unavailable: `Confirm the ${label} executable is on PATH and runnable, then rerun the scan.`,
   };
   return {
@@ -166,6 +190,10 @@ export function providerLabel(provider: ProviderId): string {
 function formatSeconds(milliseconds: number): string {
   const seconds = milliseconds / 1000;
   return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)} s`;
+}
+
+function formatMegabytes(bytes: number): string {
+  return `${Math.round(bytes / (1024 * 1024))} MB`;
 }
 
 export function parseSemanticVersion(output: unknown): string {
@@ -234,10 +262,31 @@ export const GENERATED_DIRECTORY_NAMES: ReadonlySet<string> = new Set([
  * The one shared recursive walker. It reports files accepted by the predicate,
  * skips generated directories, and does not follow directory symlinks so that
  * linked trees cannot create cycles or reach outside the walked root.
+ *
+ * When a scan context is given, a directory on the selected working
+ * directory's ancestor chain is always entered, even when its name is in the
+ * generated list: the exclusions prune off-chain subtrees, never the chain.
+ * Inside such a directory only the chain itself is followed, so its other
+ * generated content stays out of inventory.
  */
 export async function walkFiles(
   root: string,
   accept: (name: string, candidate: string) => boolean,
+  context?: ScanContext,
+): Promise<string[]> {
+  const chain = new Set(
+    context
+      ? directoriesFromRoot(context.repositoryPath, context.workingDirectory)
+      : [],
+  );
+  return walkTree(root, accept, chain, false);
+}
+
+async function walkTree(
+  root: string,
+  accept: (name: string, candidate: string) => boolean,
+  chain: ReadonlySet<string>,
+  chainOnly: boolean,
 ): Promise<string[]> {
   let entries;
   try {
@@ -248,12 +297,14 @@ export async function walkFiles(
   const files: string[] = [];
 
   for (const entry of entries) {
-    if (GENERATED_DIRECTORY_NAMES.has(entry.name)) {
-      continue;
-    }
     const candidate = path.join(root, entry.name);
+    const generated = GENERATED_DIRECTORY_NAMES.has(entry.name);
+    const onChain = chain.has(path.resolve(candidate));
     if (entry.isDirectory()) {
-      files.push(...(await walkFiles(candidate, accept)));
+      if ((generated || chainOnly) && !onChain) {
+        continue;
+      }
+      files.push(...(await walkTree(candidate, accept, chain, generated)));
     } else if (
       (entry.isFile() || entry.isSymbolicLink()) &&
       accept(entry.name, candidate)
@@ -268,8 +319,9 @@ export async function walkFiles(
 export async function findNamedFiles(
   root: string,
   names: ReadonlySet<string>,
+  context?: ScanContext,
 ): Promise<string[]> {
-  return walkFiles(root, (name) => names.has(name));
+  return walkFiles(root, (name) => names.has(name), context);
 }
 
 /**
@@ -292,8 +344,11 @@ export function reachForDirectory(
     : "repository";
 }
 
-export async function findSkillFiles(root: string): Promise<string[]> {
-  return findNamedFiles(root, new Set(["SKILL.md"]));
+export async function findSkillFiles(
+  root: string,
+  context?: ScanContext,
+): Promise<string[]> {
+  return findNamedFiles(root, new Set(["SKILL.md"]), context);
 }
 
 export async function canonicalPath(candidate: string): Promise<string> {

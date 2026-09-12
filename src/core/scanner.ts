@@ -4,10 +4,12 @@ import path from "node:path";
 import type { ProviderAdapter, ScanContext } from "./provider-adapter.ts";
 import type {
   EffectiveConfiguration,
+  Finding,
   JsonValue,
   PublicResourceRecord,
   ResourceKind,
   ResourceLoadMode,
+  ResourceRecord,
   ScanReport,
   ScanSnapshot,
 } from "./schema.ts";
@@ -23,7 +25,10 @@ export async function scanProvider(
   );
   const findings = [
     ...detectionFindings(detection),
-    ...(await adapter.validate(context, effective.resources)),
+    ...scopeFindings(
+      await adapter.validate(context, effective.resources),
+      effective.resources,
+    ),
   ];
 
   return {
@@ -62,6 +67,10 @@ function normalizeEffective(
         reach === "repository" && resource.state === "active"
           ? ("inactive" as const)
           : resource.state,
+      findings:
+        reach === "repository"
+          ? resource.findings.map(offChainFinding)
+          : resource.findings,
     };
   });
   const offChain = new Set(
@@ -80,6 +89,35 @@ function normalizeEffective(
       (decision) => !offChain.has(decision.resourceId),
     ),
   };
+}
+
+/**
+ * Findings mirror the reach of the resource they belong to. A finding on an
+ * off-chain resource keeps its severity (a broken import is still broken in
+ * that file) but carries `reach: "repository"` so default totals can skip it.
+ */
+function scopeFindings(
+  findings: Finding[],
+  resources: ResourceRecord[],
+): Finding[] {
+  const offChain = new Set(
+    resources
+      .filter((resource) => resource.reach === "repository")
+      .map((resource) => resource.id),
+  );
+  return findings.map((finding) =>
+    finding.resourceId && offChain.has(finding.resourceId)
+      ? offChainFinding(finding)
+      : finding,
+  );
+}
+
+function offChainFinding(finding: Finding): Finding {
+  return { ...finding, reach: "repository" };
+}
+
+export function isInContext(finding: Pick<Finding, "reach">): boolean {
+  return finding.reach !== "repository";
 }
 
 function detectionFindings(

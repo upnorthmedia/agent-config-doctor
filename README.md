@@ -92,7 +92,7 @@ Providers must be installed for their configuration to be scanned. Missing execu
 
 ### Native inspection and scan completeness
 
-Native listing commands (`claude plugin list --json`, `codex plugin list --json`, `codex mcp list --json`, `grok inspect --json`) run asynchronously with a 15 second budget each, so a slow provider start does not block the others. A command that times out, exits with an error, returns malformed JSON, or cannot be started is recorded as a scan notice instead of being treated as "no native data". Notices name the provider and the command, explain which evidence is incomplete, and say how to rerun the scan. They appear in the JSON report under `notices`, on stderr for `scan --json`, in the `doctor` summary, and as a banner in the dashboard. Notices are operational; they are never findings against your configuration and never change the error count. Each entry in `providers` also carries `complete: false` while its evidence is incomplete.
+Native listing commands (`claude plugin list --json`, `codex plugin list --json`, `codex mcp list --json`, `grok inspect --json`) run asynchronously with a 15 second budget each, so a slow provider start does not block the others. A command that times out, exits with an error, returns malformed JSON, returns more than 10 MB, or cannot be started is recorded as a scan notice instead of being treated as "no native data". Notices name the provider and the command, explain which evidence is incomplete, and say how to rerun the scan. They appear in the JSON report under `notices`, on stderr for `scan --json`, in the `doctor` summary, and as a banner in the dashboard. Notices are operational; they are never findings against your configuration and never change the error count. Each entry in `providers` also carries `complete: false` while its evidence is incomplete.
 
 ## JSON report
 
@@ -104,6 +104,7 @@ Every report carries `schemaVersion: 1`. Version 1.0.1 adds optional fields only
 | `resources[].loadMode` | `context-loaded`, `on-demand`, `explicitly-enabled` | Instructions load into context, skills are available on demand, plugins and MCP servers must be enabled. |
 | `resources[].generated` | `true` when present | Caches and provider runtime copies (plugin caches, Codex system skills, Grok bundled skills, Hermes bundled copies) that the user does not author. |
 | `resources[].owner.type` | `self`, `administrator`, `plugin`, `package`, `provider` | Who controls the file. `self` means the user. Codex marketplace plugins, Grok bundled skills, and Hermes bundled or protected skills are `provider` owned. |
+| `findings[].reach` | `repository` when present | The finding belongs to a resource found outside the selected directory's ancestor chain. It keeps its real severity but is left out of the overview and `doctor` totals, which report such findings separately as "elsewhere in repository". |
 | `providers[].complete` | boolean | `false` when a native inspection command for that provider failed. |
 | `notices[]` | `{ code, provider, command, message, remediation }` | Operational scan notices such as `native.command.timeout`. |
 

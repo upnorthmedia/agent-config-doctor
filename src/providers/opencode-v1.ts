@@ -404,7 +404,7 @@ async function discoverInstructions(
   // Project: the first file name with any match on the chain wins, and every
   // ancestor copy of that name loads, nearest first.
   const projectNames = ["AGENTS.md", "CLAUDE.md", "CONTEXT.md"];
-  const discovered = await findNamedFiles(context.repositoryPath, new Set(projectNames));
+  const discovered = await findNamedFiles(context.repositoryPath, new Set(projectNames), context);
   const projectResources = new Map<string, ResourceRecord>();
   for (const filePath of discovered) {
     const directory = path.dirname(filePath);
@@ -607,12 +607,12 @@ async function resolveInstructionGlob(
 ): Promise<string[]> {
   const expanded = raw.startsWith("~/") ? path.join(paths.home, raw.slice(2)) : raw;
   if (path.isAbsolute(expanded)) {
-    return globFiles(path.dirname(expanded), path.basename(expanded));
+    return globFiles(path.dirname(expanded), path.basename(expanded), context);
   }
   const bases = paths.flags.disableProjectConfig ? [paths.configDir] : nearestFirst;
   const matches: string[] = [];
   for (const base of bases) {
-    matches.push(...(await globFiles(base, expanded)));
+    matches.push(...(await globFiles(base, expanded, context)));
   }
   return matches;
 }
@@ -620,14 +620,21 @@ async function resolveInstructionGlob(
 const GLOB_CHARACTERS = /[*?{[]/;
 
 /** Minimal glob support: `*`, `?`, `**`, and `{a,b}` alternatives. */
-async function globFiles(base: string, pattern: string): Promise<string[]> {
+async function globFiles(
+  base: string,
+  pattern: string,
+  context: ScanContext,
+): Promise<string[]> {
   if (!GLOB_CHARACTERS.test(pattern)) {
     const candidate = path.resolve(base, pattern);
     return (await isFile(candidate)) ? [candidate] : [];
   }
   const matcher = globToRegExp(pattern);
-  const files = await walkFiles(base, (_name, candidate) =>
-    matcher.test(path.relative(base, candidate).split(path.sep).join("/")),
+  const files = await walkFiles(
+    base,
+    (_name, candidate) =>
+      matcher.test(path.relative(base, candidate).split(path.sep).join("/")),
+    context,
   );
   return files;
 }
@@ -777,7 +784,7 @@ async function discoverSkills(
 
   // Repository copies outside the chain stay visible as inventory.
   const known = new Set(locations.map((location) => path.resolve(location.skillPath)));
-  for (const skillPath of await findSkillFiles(context.repositoryPath)) {
+  for (const skillPath of await findSkillFiles(context.repositoryPath, context)) {
     if (known.has(path.resolve(skillPath))) {
       continue;
     }

@@ -133,6 +133,25 @@ test("classifies nonzero exit, malformed JSON, and unavailable commands separate
   );
 });
 
+test("a native listing larger than the scan reads is classified as oversized output", async () => {
+  const snapshot = await scanProvider(new CodexAdapter(), createContext("codex-oversized"));
+
+  assert.deepEqual(
+    snapshot.notices.map((notice) => notice.code),
+    ["native.command.oversized-output", "native.command.oversized-output"],
+  );
+  for (const notice of snapshot.notices) {
+    assert.match(notice.message, /returned more output than the scan reads \(output exceeded 10 MB\)/);
+    assert.match(notice.remediation, /check why its output exceeds 10 MB/);
+    assert.doesNotMatch(notice.remediation, /on PATH/);
+  }
+  assert.equal(
+    snapshot.effective.resources.some((resource) => resource.kind === "plugin"),
+    false,
+  );
+  assert.equal(snapshot.findings.some((finding) => finding.code.startsWith("native.")), false);
+});
+
 test("a healthy scan reports every provider as complete with no notices", async () => {
   const context = createContext("codex");
   const report = createScanReport(

@@ -101,6 +101,46 @@ test("scanning this repository keeps fixture resources out of the effective chai
   }
 });
 
+test("findings on fixture resources keep their severity but never count as in-context errors", async (t) => {
+  const adapters = [
+    new ClaudeAdapter(),
+    new CodexAdapter(),
+    new GrokAdapter(),
+    new OpenCodeAdapter(),
+    new HermesAdapter(),
+  ];
+  const scan = await scanProviders(adapters, await selfScanContext(t));
+  const byId = new Map(scan.report.resources.map((resource) => [resource.id, resource]));
+  const brokenImport = scan.report.findings.find(
+    (finding) =>
+      finding.code === "claude.instruction.broken-import" &&
+      byId.get(finding.resourceId ?? "")?.displayPath ===
+        "$REPO/test/fixtures/claude/provider/repo/missing-instructions.md",
+  );
+
+  assert.ok(brokenImport, "the fixture broken import is still reported");
+  assert.equal(brokenImport.severity, "error");
+  assert.equal(brokenImport.reach, "repository");
+  const inContextErrors = scan.report.findings.filter(
+    (finding) => finding.reach !== "repository" && finding.severity === "error",
+  );
+  assert.deepEqual(inContextErrors, []);
+  // Natively listed plugin skills are authoritative wherever their files live,
+  // so only findings on resources the repository walk discovered are off-chain.
+  for (const finding of scan.report.findings) {
+    const resource = finding.resourceId ? byId.get(finding.resourceId) : undefined;
+    const onFixture =
+      resource?.displayPath?.startsWith("$REPO/test/fixtures/") &&
+      resource.evidenceType !== "native" &&
+      resource.owner.type !== "plugin";
+    assert.equal(
+      finding.reach,
+      onFixture ? "repository" : resource?.reach === "repository" ? "repository" : undefined,
+      `${finding.code} on ${resource?.displayPath ?? "no resource"}`,
+    );
+  }
+});
+
 test("nested synthetic homes stay visible as repository inventory instead of being hidden", async (t) => {
   const snapshot = await scanProvider(new CodexAdapter(), await selfScanContext(t));
   const nestedHomeInstruction = snapshot.effective.resources.find(
@@ -143,6 +183,52 @@ test("walker skips generated directories and reports the ancestor chain", async 
   assert.equal(reachForDirectory(path.join(root, "packages", "api"), context), "chain");
   assert.equal(reachForDirectory(path.join(root, "packages", "web"), context), "repository");
   assert.equal(reachForDirectory(os.homedir(), context), "chain");
+});
+
+test("a working directory under a generated directory name keeps its chain files effective", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "agent-config-build-chain-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const workingDirectory = path.join(root, "build", "tools");
+  await mkdir(workingDirectory, { recursive: true });
+  await mkdir(path.join(root, "build", "output"), { recursive: true });
+  await writeFile(path.join(root, "AGENTS.md"), "# root\n", "utf8");
+  await writeFile(path.join(workingDirectory, "AGENTS.md"), "# tools\n", "utf8");
+  await writeFile(path.join(workingDirectory, "CLAUDE.md"), "# tools\n", "utf8");
+  await writeFile(path.join(root, "build", "output", "AGENTS.md"), "# generated\n", "utf8");
+  const homeDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-config-build-home-"));
+  t.after(() => rm(homeDirectory, { recursive: true, force: true }));
+  const context: ScanContext = {
+    homeDirectory,
+    repositoryPath: root,
+    workingDirectory,
+    environment: { CODEX_HOME: path.join(homeDirectory, ".codex") },
+    executables: {
+      claude: path.join(claudeFixture, "bin", "claude"),
+      codex: path.join(codexFixture, "bin", "codex"),
+    },
+  };
+
+  const codex = await scanProvider(new CodexAdapter(), context);
+  const claude = await scanProvider(new ClaudeAdapter(), context);
+  const orderedPaths = (snapshot: typeof codex) =>
+    snapshot.effective.orderedResourceIds.map(
+      (id) => snapshot.effective.resources.find((resource) => resource.id === id)?.displayPath,
+    );
+
+  assert.deepEqual(orderedPaths(codex), ["$REPO/AGENTS.md", "$REPO/build/tools/AGENTS.md"]);
+  assert.ok(orderedPaths(claude).includes("$REPO/build/tools/CLAUDE.md"));
+  for (const snapshot of [codex, claude]) {
+    const paths = snapshot.effective.resources.map((resource) => resource.displayPath);
+    assert.equal(paths.includes("$REPO/build/output/AGENTS.md"), false, "generated siblings stay excluded");
+    for (const resource of snapshot.effective.resources) {
+      if (resource.displayPath?.startsWith("$REPO/build/tools/")) {
+        assert.equal(resource.reach, "chain", resource.displayPath);
+        assert.equal(resource.state, "active", resource.displayPath);
+      }
+    }
+  }
+  assert.deepEqual(codex.notices, []);
+  assert.deepEqual(claude.notices, []);
 });
 
 test("discovers Codex system skills as provider-owned resources", async () => {

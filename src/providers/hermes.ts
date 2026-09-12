@@ -267,8 +267,8 @@ async function discoverInstructions(
 ): Promise<ResourceRecord[]> {
   const candidates = [
     path.join(hermesHome, "SOUL.md"),
-    ...(await findNamedFiles(context.repositoryPath, CONTEXT_NAMES)),
-    ...(await findCursorRules(context.repositoryPath)),
+    ...(await findNamedFiles(context.repositoryPath, CONTEXT_NAMES, context)),
+    ...(await findCursorRules(context.repositoryPath, context)),
   ];
   const resources: ResourceRecord[] = [];
 
@@ -316,13 +316,14 @@ async function discoverInstructions(
   return resources;
 }
 
-function findCursorRules(root: string): Promise<string[]> {
+function findCursorRules(root: string, context: ScanContext): Promise<string[]> {
   return walkFiles(
     root,
     (name, candidate) =>
       name.endsWith(".mdc") &&
       path.basename(path.dirname(candidate)) === "rules" &&
       path.basename(path.dirname(path.dirname(candidate))) === ".cursor",
+    context,
   );
 }
 

@@ -93,7 +93,7 @@ export class CodexAdapter implements ProviderAdapter {
     ];
     const discoveredPaths = [
       ...(await existingFiles(codexHome, ["AGENTS.override.md", "AGENTS.md"])),
-      ...(await findNamedFiles(context.repositoryPath, new Set(projectNames))),
+      ...(await findNamedFiles(context.repositoryPath, new Set(projectNames), context)),
     ];
 
     const instructionResources = await Promise.all(
@@ -410,6 +410,7 @@ async function discoverStandaloneSkills(
   for (const skillPath of await findNamedFiles(
     context.repositoryPath,
     new Set(["SKILL.md"]),
+    context,
   )) {
     const scopeDirectory = repositorySkillScopeDirectory(skillPath);
     if (!scopeDirectory) {

@@ -1,0 +1,11 @@
+#!/usr/bin/env node
+
+// Reports a supported version, then answers native listings with valid JSON
+// that is larger than the scan reads (more than 10 MB).
+if (process.argv.includes("--version")) {
+  process.stdout.write("codex-cli 0.117.0-alpha.15\n");
+  process.exit(0);
+}
+const padding = "x".repeat(1024 * 1024);
+const items = Array.from({ length: 11 }, (_, index) => ({ name: `plugin-${index}`, padding }));
+process.stdout.write(JSON.stringify({ plugins: items, servers: items }));

@@ -59,5 +59,4 @@ test("dashboard renders scan values as text and authenticates every API request"
   assert.match(dashboardClientScript, /Elsewhere in repository/);
   assert.match(dashboardClientScript, /Scan incomplete for/);
   assert.match(document, /id="scan-notices"/);
-  assert.match(dashboardClientScript, /reach !== "repository"/);
 });

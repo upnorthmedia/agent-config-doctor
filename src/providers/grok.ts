@@ -242,7 +242,7 @@ async function parseInstructions(
   ];
   const candidates = [
     ...userCandidates,
-    ...(await findNamedFiles(context.repositoryPath, INSTRUCTION_NAMES)),
+    ...(await findNamedFiles(context.repositoryPath, INSTRUCTION_NAMES, context)),
   ];
   const resources: ResourceRecord[] = [];
 

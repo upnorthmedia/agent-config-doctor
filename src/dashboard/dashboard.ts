@@ -278,6 +278,11 @@ input:hover, select:hover { border-color: var(--border-strong); }
 input:focus, select:focus { border-color: var(--accent); }
 
 .inventory-group { margin-bottom: 20px; }
+.finding-group { margin-top: 20px; }
+.finding-group > summary { cursor: pointer; list-style: none; }
+.finding-group > summary::-webkit-details-marker { display: none; }
+.finding-group > summary::before { content: "+ "; }
+.finding-group[open] > summary::before { content: "- "; }
 .inventory-group-heading { display: flex; justify-content: space-between; gap: 12px; padding: 8px 3px; color: var(--muted); font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.055em; }
 .resource-row { width: 100%; display: grid; grid-template-columns: minmax(180px, 1.4fr) 90px 80px 80px minmax(160px, 1fr) 82px; align-items: center; gap: 12px; min-height: 49px; padding: 8px 10px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; color: var(--text); text-align: left; }
 .resource-row:first-of-type { border-top: 1px solid var(--border); }
@@ -462,6 +467,10 @@ export const dashboardClientScript = String.raw`
     return state.report.resources.filter(inContext);
   }
 
+  function contextFindings() {
+    return state.report.findings.filter(inContext);
+  }
+
   function switchView(view) {
     if (view === "detail" && !state.selectedResourceId) return;
     state.view = view;
@@ -515,7 +524,7 @@ export const dashboardClientScript = String.raw`
   function renderOverview() {
     const resources = contextResources();
     const active = resources.filter((resource) => resource.state === "active").length;
-    const highConfidence = state.report.findings.filter((finding) => finding.confidence === "high");
+    const highConfidence = contextFindings().filter((finding) => finding.confidence === "high");
     const detected = state.report.providers.filter((provider) => provider.installed).length;
     byId("summary-providers").textContent = detected;
     byId("summary-resources").textContent = resources.length;
@@ -694,11 +703,20 @@ export const dashboardClientScript = String.raw`
 
   function renderFindings() {
     const severityOrder = { error: 0, warning: 1, info: 2 };
-    const findings = [...state.report.findings].sort((left, right) => severityOrder[left.severity] - severityOrder[right.severity] || left.code.localeCompare(right.code));
-    byId("finding-count").textContent = plural(findings.length, "finding");
+    const bySeverity = (left, right) => severityOrder[left.severity] - severityOrder[right.severity] || left.code.localeCompare(right.code);
+    const findings = contextFindings().sort(bySeverity);
+    const elsewhere = state.report.findings.filter((finding) => !inContext(finding)).sort(bySeverity);
+    byId("finding-count").textContent = plural(findings.length, "finding") + (elsewhere.length > 0 ? " (" + elsewhere.length + " more elsewhere in repository)" : "");
     const list = byId("finding-list");
     list.replaceChildren();
     renderFindingsInto(list, findings);
+    if (elsewhere.length === 0) return;
+    const group = element("details", "finding-group");
+    const heading = element("summary", "inventory-group-heading");
+    heading.append(element("span", "", "Elsewhere in repository"), element("span", "", elsewhere.length));
+    group.append(heading);
+    renderFindingsInto(group, elsewhere);
+    list.append(group);
   }
 
   function detailPair(label, value) {

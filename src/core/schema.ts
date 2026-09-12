@@ -62,6 +62,12 @@ export interface Finding {
   confidence: FindingConfidence;
   message: string;
   resourceId?: string;
+  /**
+   * Set to `repository` when the finding belongs to a resource found outside
+   * the selected directory's ancestor chain. Such findings keep their true
+   * severity but are left out of every default total.
+   */
+  reach?: ResourceReach;
 }
 
 /**
