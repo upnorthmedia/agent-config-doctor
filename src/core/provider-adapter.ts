@@ -30,6 +30,8 @@ export interface ProviderDetection {
   version: string;
   support: "supported" | "unsupported" | "unavailable";
   generation?: string;
+  /** Extra context for an unsupported version, appended to its finding. */
+  supportNote?: string;
   executablePath?: string;
   configRoots: string[];
 }

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["cached-plugin@1.0.0"],
+  "instructions": ["~/.config/opencode/global-guide.md"],
+  "provider": {
+    "fixture": {
+      "options": { "apiKey": "fixture-password-provider-key" }
+    }
+  },
+  "mcp": {
+    "shared-mcp": {
+      "type": "remote",
+      "url": "https://fixture-user:fixture-password@example.test/mcp?token=fixture-sensitive-query",
+      "headers": { "Authorization": "fixture-sensitive-header" }
+    },
+    "global-mcp": {
+      "type": "local",
+      "command": ["node", "global-server.js", "fixture-sensitive-argument"],
+      "environment": { "API_TOKEN": "fixture-sensitive-environment" }
+    }
+  }
+}

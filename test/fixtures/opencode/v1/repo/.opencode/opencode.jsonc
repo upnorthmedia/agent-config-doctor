@@ -1,0 +1,8 @@
+{
+  // Repository .opencode configuration wins over the direct opencode.json.
+  "mcp": {
+    "shared-mcp": {
+      "enabled": false,
+    },
+  },
+}

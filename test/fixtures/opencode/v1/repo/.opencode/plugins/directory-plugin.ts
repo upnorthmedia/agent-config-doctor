@@ -1,0 +1,1 @@
+export const DirectoryPlugin = async () => ({});

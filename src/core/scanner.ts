@@ -91,7 +91,7 @@ function detectionFindings(
         code: "provider.version.unsupported",
         severity: "warning",
         confidence: "high",
-        message: `The installed ${detection.provider} version (${detection.version}) is not supported by this adapter.`,
+        message: `The installed ${detection.provider} version (${detection.version}) is not supported by this adapter.${detection.supportNote ? ` ${detection.supportNote}` : ""}`,
       },
     ];
   }
