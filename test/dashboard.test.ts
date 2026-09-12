@@ -47,6 +47,7 @@ test("dashboard uses the incumbent restrained dark system and responsive structu
 });
 
 test("dashboard renders scan values as text and authenticates every API request", () => {
+  const document = dashboardDocument();
   assert.equal(dashboardClientScript.includes("innerHTML"), false);
   assert.match(dashboardClientScript, /textContent/);
   assert.match(dashboardClientScript, /Authorization/);
@@ -56,5 +57,7 @@ test("dashboard renders scan values as text and authenticates every API request"
   assert.match(dashboardClientScript, /api\/actions\/reveal/);
   assert.equal(dashboardClientScript.includes("select-working-directory"), false);
   assert.match(dashboardClientScript, /Elsewhere in repository/);
+  assert.match(dashboardClientScript, /Scan incomplete for/);
+  assert.match(document, /id="scan-notices"/);
   assert.match(dashboardClientScript, /reach !== "repository"/);
 });

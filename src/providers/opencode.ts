@@ -4,6 +4,7 @@ import path from "node:path";
 import { SCHEMA_VERSION } from "../core/schema.ts";
 import type {
   AdapterCapabilities,
+  DiscoveryResult,
   ProviderAdapter,
   ProviderDetection,
   ScanContext,
@@ -55,7 +56,7 @@ export class OpenCodeAdapter implements ProviderAdapter {
 
   async detect(context: ScanContext): Promise<ProviderDetection> {
     const executablePath = context.executables?.opencode ?? "opencode";
-    const result = runCommand(executablePath, ["--version"], context, 2_000);
+    const result = await runCommand(executablePath, ["--version"], context, 2_000);
     const version = parseSemanticVersion(result.stdout);
     const installed = result.status === 0;
     const major = version === "unknown" ? undefined : Number(version.split(".")[0]);
@@ -92,9 +93,9 @@ export class OpenCodeAdapter implements ProviderAdapter {
   async discover(
     context: ScanContext,
     detection: ProviderDetection,
-  ): Promise<ResourceRecord[]> {
+  ): Promise<DiscoveryResult> {
     if (detection.support !== "supported" || detection.generation !== "v2") {
-      return [];
+      return { resources: [], notices: [] };
     }
     const userRoot = opencodeUserRoot(context);
     const configSources = await discoverConfigSources(context, userRoot);
@@ -111,7 +112,10 @@ export class OpenCodeAdapter implements ProviderAdapter {
       configSources,
     );
 
-    return [...instructions, ...skills, ...configResources].sort(compareResources);
+    return {
+      resources: [...instructions, ...skills, ...configResources].sort(compareResources),
+      notices: [],
+    };
   }
 
   async resolveEffective(

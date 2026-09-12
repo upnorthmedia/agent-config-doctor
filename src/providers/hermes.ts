@@ -5,6 +5,7 @@ import path from "node:path";
 import { SCHEMA_VERSION } from "../core/schema.ts";
 import type {
   AdapterCapabilities,
+  DiscoveryResult,
   ProviderAdapter,
   ProviderDetection,
   ScanContext,
@@ -62,7 +63,7 @@ export class HermesAdapter implements ProviderAdapter {
 
   async detect(context: ScanContext): Promise<ProviderDetection> {
     const executablePath = context.executables?.hermes ?? "hermes";
-    const result = runCommand(executablePath, ["--version"], context, 2_000);
+    const result = await runCommand(executablePath, ["--version"], context, 2_000);
     const version = parseHermesVersion(result.stdout);
     const installed = result.status === 0;
     const hermesHome = getHermesHome(context);
@@ -89,9 +90,9 @@ export class HermesAdapter implements ProviderAdapter {
   async discover(
     context: ScanContext,
     detection: ProviderDetection,
-  ): Promise<ResourceRecord[]> {
+  ): Promise<DiscoveryResult> {
     if (detection.support !== "supported") {
-      return [];
+      return { resources: [], notices: [] };
     }
 
     const hermesHome = getHermesHome(context);
@@ -105,7 +106,7 @@ export class HermesAdapter implements ProviderAdapter {
       parsedConfig,
     );
 
-    return [
+    const resources = [
       ...(await discoverInstructions(context, detection.version, hermesHome)),
       ...(await discoverSkills(
         context,
@@ -122,6 +123,7 @@ export class HermesAdapter implements ProviderAdapter {
         parsedConfig,
       )),
     ].sort(compareResources);
+    return { resources, notices: [] };
   }
 
   async resolveEffective(

@@ -15,9 +15,9 @@ export async function scanProvider(
   context: ScanContext,
 ): Promise<ScanSnapshot> {
   const detection = await adapter.detect(context);
-  const installed = await adapter.discover(context, detection);
+  const discovery = await adapter.discover(context, detection);
   const effective = scopeToAncestorChain(
-    await adapter.resolveEffective(context, installed, detection),
+    await adapter.resolveEffective(context, discovery.resources, detection),
   );
   const findings = [
     ...detectionFindings(detection),
@@ -28,6 +28,7 @@ export async function scanProvider(
     detection,
     effective,
     findings,
+    notices: discovery.notices,
   };
 }
 
@@ -127,6 +128,7 @@ export function createScanReport(
       configRoots: snapshot.detection.configRoots.map((root) =>
         redactPath(root, context),
       ),
+      complete: snapshot.notices.length === 0,
     },
     resources,
     effective: {
@@ -141,6 +143,9 @@ export function createScanReport(
       `${left.code}:${left.resourceId ?? ""}:${left.message}`.localeCompare(
         `${right.code}:${right.resourceId ?? ""}:${right.message}`,
       ),
+    ),
+    notices: [...snapshot.notices].sort((left, right) =>
+      `${left.code}:${left.command}`.localeCompare(`${right.code}:${right.command}`),
     ),
   };
 

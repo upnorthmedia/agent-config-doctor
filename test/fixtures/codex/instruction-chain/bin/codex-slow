@@ -1,0 +1,26 @@
+#!/usr/bin/env node
+
+// Delegates to the regular Codex fixture, but stalls plugin listing first so
+// tests can prove what happens when a cold "codex plugin list --json" takes
+// longer than the native command budget.
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const realCodex = fileURLToPath(new URL("./codex", import.meta.url));
+const args = process.argv.slice(2);
+
+if (args.includes("plugin") && args.includes("list")) {
+  const delay = Number(process.env.CODEX_FIXTURE_DELAY_MS ?? "5500");
+  const finish = Date.now() + delay;
+  while (Date.now() < finish) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+  }
+}
+
+const result = spawnSync(process.execPath, [realCodex, ...args], {
+  encoding: "utf8",
+  env: process.env,
+});
+process.stdout.write(result.stdout ?? "");
+process.stderr.write(result.stderr ?? "");
+process.exit(result.status ?? 1);

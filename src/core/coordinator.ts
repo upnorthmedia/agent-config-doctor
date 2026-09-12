@@ -61,6 +61,7 @@ export async function scanProviders(
             `${right.provider}:${right.code}:${right.resourceId ?? ""}:${right.message}`,
           ),
         ),
+      notices: reports.flatMap((report) => report.notices),
     },
   };
 }

@@ -42,6 +42,7 @@ export function dashboardDocument(): string {
 
     <main class="workspace">
       <div class="session-error" id="session-error" role="alert" hidden></div>
+      <div class="scan-notices" id="scan-notices" role="status" hidden></div>
       <section class="view" id="view-overview" data-view-panel="overview">
         <div class="view-heading">
           <div>
@@ -233,6 +234,12 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .scan-time, .result-count { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .session-error { width: min(1180px, 100%); margin: 0 auto 20px; padding: 10px 12px; color: var(--error-text); background: color-mix(in srgb, var(--error) 9%, transparent); border: 1px solid color-mix(in srgb, var(--error) 35%, transparent); border-radius: 6px; }
+.scan-notices { width: min(1180px, 100%); margin: 0 auto 20px; display: grid; gap: 8px; }
+.scan-notice { padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); border-radius: 6px; background: color-mix(in srgb, var(--warn) 8%, transparent); color: var(--text); }
+.scan-notice strong { display: block; margin-bottom: 3px; color: var(--warn); font-size: 12px; }
+.scan-notice p { margin: 0; color: var(--muted); font-size: 12px; }
+.scan-notice p + p { margin-top: 4px; }
+.status-badge.incomplete { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, transparent); background: color-mix(in srgb, var(--warn) 7%, transparent); }
 .summary-band { display: grid; grid-template-columns: repeat(4, 1fr); margin-bottom: 32px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .summary-band > div { min-width: 0; padding: 16px 18px; display: grid; gap: 3px; border-right: 1px solid var(--border); }
 .summary-band > div:last-child { border-right: 0; }
@@ -483,6 +490,22 @@ export const dashboardClientScript = String.raw`
     }
   }
 
+  function renderNotices() {
+    const container = byId("scan-notices");
+    container.replaceChildren();
+    const notices = state.report.notices || [];
+    container.hidden = notices.length === 0;
+    for (const notice of notices) {
+      const item = element("div", "scan-notice");
+      item.append(
+        element("strong", "", "Scan incomplete for " + providerLabel(notice.provider) + ": " + notice.command),
+        element("p", "", notice.message),
+        element("p", "", notice.remediation),
+      );
+      container.append(item);
+    }
+  }
+
   function renderOverview() {
     const resources = contextResources();
     const active = resources.filter((resource) => resource.state === "active").length;
@@ -509,7 +532,7 @@ export const dashboardClientScript = String.raw`
         element("span", "provider-name", providerLabel(provider.provider)),
         element("span", "provider-version", provider.installed ? provider.version : "not detected"),
         element("span", "provider-resource-count", plural(resources.filter((resource) => resource.provider === provider.provider).length, "resource")),
-        statusBadge(provider.support),
+        statusBadge(provider.complete === false ? "incomplete" : provider.support),
       );
       providerList.append(row);
     }
@@ -733,6 +756,7 @@ export const dashboardClientScript = String.raw`
   }
 
   function renderAll() {
+    renderNotices();
     renderOverview();
     renderFilters();
     renderInventory();

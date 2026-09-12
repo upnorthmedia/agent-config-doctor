@@ -93,10 +93,13 @@ test("writes stable aggregate scan JSON alone on stdout", () => {
   const report = JSON.parse(first.stdout) as {
     schemaVersion: number;
     subject: { repository: string };
-    providers: Array<{ provider: string }>;
+    providers: Array<{ provider: string; complete: boolean }>;
     resources: Array<{ provider: string }>;
+    notices: unknown[];
   };
   assert.equal(report.schemaVersion, 1);
+  assert.deepEqual(report.notices, []);
+  assert.ok(report.providers.every((provider) => provider.complete === true));
   assert.equal(report.subject.repository, "$REPO");
   assert.equal(report.providers.length, 5);
   assert.ok(report.resources.some((resource) => resource.provider === "codex"));
@@ -140,6 +143,7 @@ test("doctor prints findings and serves a local dashboard URL", async () => {
   assert.match(result.stdout, /Providers: 1 detected, 4 unavailable/);
   assert.match(result.stdout, /Resources: \d+ installed, [1-9]\d* elsewhere in repository/);
   assert.match(result.stdout, /Findings: 1 error, 4 warnings, 0 info/);
+  assert.match(result.stdout, /Scan: complete/);
   assert.equal(result.stdout.includes(fixtureRoot), false);
   assert.equal(result.stdout.includes("fixture-sensitive"), false);
 });

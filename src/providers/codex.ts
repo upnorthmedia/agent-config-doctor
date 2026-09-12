@@ -6,6 +6,7 @@ import { parse as parseToml } from "smol-toml";
 import { SCHEMA_VERSION } from "../core/schema.ts";
 import type {
   AdapterCapabilities,
+  DiscoveryResult,
   ProviderAdapter,
   ProviderDetection,
   ScanContext,
@@ -15,6 +16,7 @@ import type {
   Finding,
   JsonValue,
   ResourceRecord,
+  ScanNotice,
 } from "../core/schema.ts";
 import {
   canonicalPath,
@@ -24,13 +26,14 @@ import {
   isDirectory,
   isRecord,
   isWithin,
+  nativeNotice,
   parseSemanticVersion,
   parseSkillFrontmatter,
   reachForDirectory,
   readJsonFile,
   resourceId,
   runCommand,
-  runJsonCommand,
+  runNativeJson,
   sanitizeUrl,
   stringValue,
 } from "./shared.ts";
@@ -45,7 +48,7 @@ export class CodexAdapter implements ProviderAdapter {
   async detect(context: ScanContext): Promise<ProviderDetection> {
     const codexHome = codexHomeFor(context);
     const executablePath = context.executables?.codex ?? "codex";
-    const result = runCommand(executablePath, ["--version"], context, 2_000);
+    const result = await runCommand(executablePath, ["--version"], context, 2_000);
     const version = parseSemanticVersion(result.stdout);
     const installed = result.status === 0;
     const configRoots = [codexHome];
@@ -72,10 +75,11 @@ export class CodexAdapter implements ProviderAdapter {
   async discover(
     context: ScanContext,
     detection: ProviderDetection,
-  ): Promise<ResourceRecord[]> {
+  ): Promise<DiscoveryResult> {
     if (detection.support !== "supported") {
-      return [];
+      return { resources: [], notices: [] };
     }
+    const notices: ScanNotice[] = [];
     const codexHome = detection.configRoots[0] ?? codexHomeFor(context);
     const userConfigPath = path.join(codexHome, "config.toml");
     const projectConfigPath = path.join(context.repositoryPath, ".codex", "config.toml");
@@ -111,6 +115,7 @@ export class CodexAdapter implements ProviderAdapter {
       context,
       detection,
       codexHome,
+      notices,
     );
     const nativeMcpResources = await discoverNativeMcpServers(
       context,
@@ -121,6 +126,7 @@ export class CodexAdapter implements ProviderAdapter {
       projectConfig,
       userConfigPath,
       projectConfigPath,
+      notices,
     );
     const resources = [
       ...instructionResources,
@@ -129,7 +135,7 @@ export class CodexAdapter implements ProviderAdapter {
       ...nativeMcpResources,
     ];
 
-    return resources.sort(compareResources);
+    return { resources: resources.sort(compareResources), notices };
   }
 
   async resolveEffective(
@@ -608,13 +614,34 @@ async function discoverPlugins(
   context: ScanContext,
   detection: ProviderDetection,
   codexHome: string,
+  notices: ScanNotice[],
 ): Promise<ResourceRecord[]> {
-  const payload = runJsonCommand(
+  const outcome = await runNativeJson(
     detection.executablePath,
     ["-C", context.workingDirectory, "plugin", "list", "--json"],
     context,
   );
+  if (!outcome.ok) {
+    notices.push(
+      nativeNotice(
+        "codex",
+        "codex plugin list --json",
+        outcome,
+        "Codex plugin evidence",
+      ),
+    );
+    return [];
+  }
+  const payload = outcome.payload;
   if (!isRecord(payload) || !Array.isArray(payload.installed)) {
+    notices.push(
+      nativeNotice(
+        "codex",
+        "codex plugin list --json",
+        { ok: false, failure: "malformed-json", detail: "unexpected JSON shape" },
+        "Codex plugin evidence",
+      ),
+    );
     return [];
   }
 
@@ -763,13 +790,34 @@ async function discoverNativeMcpServers(
   projectConfig: Record<string, unknown>,
   userConfigPath: string,
   projectConfigPath: string,
+  notices: ScanNotice[],
 ): Promise<ResourceRecord[]> {
-  const payload = runJsonCommand(
+  const outcome = await runNativeJson(
     detection.executablePath,
     ["-C", context.workingDirectory, "mcp", "list", "--json"],
     context,
   );
+  if (!outcome.ok) {
+    notices.push(
+      nativeNotice(
+        "codex",
+        "codex mcp list --json",
+        outcome,
+        "Codex MCP server evidence",
+      ),
+    );
+    return [];
+  }
+  const payload = outcome.payload;
   if (!Array.isArray(payload)) {
+    notices.push(
+      nativeNotice(
+        "codex",
+        "codex mcp list --json",
+        { ok: false, failure: "malformed-json", detail: "unexpected JSON shape" },
+        "Codex MCP server evidence",
+      ),
+    );
     return [];
   }
 

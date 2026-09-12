@@ -51,7 +51,16 @@ async function runScan(argv: string[]): Promise<number> {
   }
   const scan = await scanPath(positional[0] ?? process.cwd());
   process.stdout.write(`${JSON.stringify(scan.report, null, 2)}\n`);
+  writeNotices(scan, process.stderr);
   return 0;
+}
+
+function writeNotices(scan: CoordinatedScan, stream: NodeJS.WriteStream): void {
+  for (const notice of scan.report.notices) {
+    stream.write(
+      `Notice (${notice.provider}, scan incomplete): ${notice.message}\n  ${notice.remediation}\n`,
+    );
+  }
 }
 
 async function runDoctor(argv: string[]): Promise<number> {
@@ -85,10 +94,12 @@ function writeDoctorSummary(scan: CoordinatedScan): void {
       `Providers: ${detected} detected, ${unavailable} unavailable`,
       `Resources: ${installed} installed, ${elsewhere} elsewhere in repository`,
       `Findings: ${formatCount(counts.error, "error")}, ${formatCount(counts.warning, "warning")}, ${counts.info} info`,
-      "",
+      `Scan: ${scan.report.notices.length === 0 ? "complete" : `incomplete, ${formatCount(scan.report.notices.length, "notice")}`}`,
       "",
     ].join("\n"),
   );
+  writeNotices(scan, process.stdout);
+  process.stdout.write("\n");
 }
 
 function formatCount(count: number, singular: string): string {

@@ -4,6 +4,7 @@ import path from "node:path";
 import { SCHEMA_VERSION } from "../core/schema.ts";
 import type {
   AdapterCapabilities,
+  DiscoveryResult,
   ProviderAdapter,
   ProviderDetection,
   ScanContext,
@@ -24,12 +25,13 @@ import {
   isFile,
   isRecord,
   isWithin,
+  nativeNotice,
   parseSemanticVersion,
   parseSkillFrontmatter,
   reachForDirectory,
   resourceId,
   runCommand,
-  runJsonCommand,
+  runNativeJson,
   stringArray,
   stringValue,
 } from "./shared.ts";
@@ -50,7 +52,7 @@ export class GrokAdapter implements ProviderAdapter {
 
   async detect(context: ScanContext): Promise<ProviderDetection> {
     const executablePath = context.executables?.grok ?? "grok";
-    const result = runCommand(executablePath, ["--version"], context, 2_000);
+    const result = await runCommand(executablePath, ["--version"], context, 2_000);
     const version = parseSemanticVersion(result.stdout);
     const installed = result.status === 0;
     const userRoot = path.join(context.homeDirectory, ".grok");
@@ -77,17 +79,41 @@ export class GrokAdapter implements ProviderAdapter {
   async discover(
     context: ScanContext,
     detection: ProviderDetection,
-  ): Promise<ResourceRecord[]> {
+  ): Promise<DiscoveryResult> {
     if (detection.support !== "supported") {
-      return [];
+      return { resources: [], notices: [] };
     }
-    const payload = runJsonCommand(
+    const outcome = await runNativeJson(
       detection.executablePath,
       ["inspect", "--json"],
       context,
     );
+    if (!outcome.ok) {
+      return {
+        resources: [],
+        notices: [
+          nativeNotice(
+            "grok",
+            "grok inspect --json",
+            outcome,
+            "All Grok Build evidence",
+          ),
+        ],
+      };
+    }
+    const payload = outcome.payload;
     if (!isRecord(payload)) {
-      return [];
+      return {
+        resources: [],
+        notices: [
+          nativeNotice(
+            "grok",
+            "grok inspect --json",
+            { ok: false, failure: "malformed-json", detail: "unexpected JSON shape" },
+            "All Grok Build evidence",
+          ),
+        ],
+      };
     }
     const pluginResources = await parsePlugins(payload, context, detection.version);
     const instructions = await parseInstructions(
@@ -108,9 +134,12 @@ export class GrokAdapter implements ProviderAdapter {
       pluginResources,
     );
 
-    return [...instructions, ...skills, ...pluginResources, ...mcps].sort(
-      compareResources,
-    );
+    return {
+      resources: [...instructions, ...skills, ...pluginResources, ...mcps].sort(
+        compareResources,
+      ),
+      notices: [],
+    };
   }
 
   async resolveEffective(

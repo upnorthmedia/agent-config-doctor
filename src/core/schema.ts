@@ -54,6 +54,19 @@ export interface Finding {
   resourceId?: string;
 }
 
+/**
+ * An operational notice about the scan itself, such as a native inspection
+ * command that timed out. Notices describe scan completeness; they are never
+ * findings against the user's configuration and never count as errors.
+ */
+export interface ScanNotice {
+  code: string;
+  provider: ProviderId;
+  command: string;
+  message: string;
+  remediation: string;
+}
+
 export interface ResourceRecord {
   id: string;
   kind: ResourceKind;
@@ -97,6 +110,7 @@ export interface ScanSnapshot {
   detection: import("./provider-adapter.ts").ProviderDetection;
   effective: EffectiveConfiguration;
   findings: Finding[];
+  notices: ScanNotice[];
 }
 
 export type PublicResourceRecord = Omit<ResourceRecord, "path">;
@@ -114,6 +128,7 @@ export interface ScanReport {
     support: import("./provider-adapter.ts").ProviderDetection["support"];
     generation?: string;
     configRoots: string[];
+    complete: boolean;
   };
   resources: PublicResourceRecord[];
   effective: {
@@ -121,6 +136,7 @@ export interface ScanReport {
     decisions: EffectiveResource[];
   };
   findings: Finding[];
+  notices: ScanNotice[];
 }
 
 export interface AggregateFinding extends Finding {
@@ -141,4 +157,5 @@ export interface AggregateScanReport {
     }
   >;
   findings: AggregateFinding[];
+  notices: ScanNotice[];
 }

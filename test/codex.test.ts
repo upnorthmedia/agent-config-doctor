@@ -79,7 +79,7 @@ test("resolves the Codex instruction chain at the repository root", async () => 
     workingDirectory: baseContext.repositoryPath,
   };
   const detection = await adapter.detect(context);
-  const installed = await adapter.discover(context, detection);
+  const { resources: installed } = await adapter.discover(context, detection);
   const effective = await adapter.resolveEffective(context, installed, detection);
   const byId = new Map(
     effective.resources.map((resource) => [resource.id, resource.displayPath]),
@@ -95,7 +95,7 @@ test("distinguishes installed instructions from the effective nested chain", asy
   const adapter = new CodexAdapter();
   const context = createContext();
   const detection = await adapter.detect(context);
-  const installed = await adapter.discover(context, detection);
+  const { resources: installed } = await adapter.discover(context, detection);
   const effective = await adapter.resolveEffective(context, installed, detection);
 
   const byDisplayPath = new Map(
@@ -143,7 +143,7 @@ test("discovers skills, plugins, and MCP servers with ownership and redaction", 
   const adapter = new CodexAdapter();
   const context = createContext();
   const detection = await adapter.detect(context);
-  const installed = await adapter.discover(context, detection);
+  const { resources: installed } = await adapter.discover(context, detection);
   const effective = await adapter.resolveEffective(context, installed, detection);
 
   const fixturePlugin = effective.resources.find(

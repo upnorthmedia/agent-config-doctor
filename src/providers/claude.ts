@@ -4,6 +4,7 @@ import path from "node:path";
 import { SCHEMA_VERSION } from "../core/schema.ts";
 import type {
   AdapterCapabilities,
+  DiscoveryResult,
   ProviderAdapter,
   ProviderDetection,
   ScanContext,
@@ -14,6 +15,7 @@ import type {
   ResourceRecord,
   ResourceScope,
   ResourceState,
+  ScanNotice,
 } from "../core/schema.ts";
 import {
   canonicalPath,
@@ -24,13 +26,14 @@ import {
   isDirectory,
   isFile,
   isRecord,
+  nativeNotice,
   parseSemanticVersion,
   parseSkillFrontmatter,
   reachForDirectory,
   readJsonFile,
   resourceId,
   runCommand,
-  runJsonCommand,
+  runNativeJson,
   sanitizeTransport,
   stringArray,
   stringValue,
@@ -47,7 +50,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 
   async detect(context: ScanContext): Promise<ProviderDetection> {
     const executablePath = context.executables?.claude ?? "claude";
-    const result = runCommand(executablePath, ["--version"], context, 2_000);
+    const result = await runCommand(executablePath, ["--version"], context, 2_000);
     const version = parseSemanticVersion(result.stdout);
     const installed = result.status === 0;
     const adminRoot = context.adminRoots?.claude ?? defaultAdminRoot();
@@ -75,10 +78,11 @@ export class ClaudeAdapter implements ProviderAdapter {
   async discover(
     context: ScanContext,
     detection: ProviderDetection,
-  ): Promise<ResourceRecord[]> {
+  ): Promise<DiscoveryResult> {
     if (detection.support !== "supported") {
-      return [];
+      return { resources: [], notices: [] };
     }
+    const notices: ScanNotice[] = [];
     const adminRoot = context.adminRoots?.claude ?? defaultAdminRoot();
     const userRoot = path.join(context.homeDirectory, ".claude");
     const roots = claudeDisplayRoots(adminRoot);
@@ -96,14 +100,17 @@ export class ClaudeAdapter implements ProviderAdapter {
       userRoot,
       roots,
     );
-    const plugins = await discoverPlugins(context, detection, roots);
+    const plugins = await discoverPlugins(context, detection, roots, notices);
     const mcps = await discoverMcpServers(
       context,
       detection.version,
       roots,
     );
 
-    return [...instructions, ...skills, ...plugins, ...mcps].sort(compareResources);
+    return {
+      resources: [...instructions, ...skills, ...plugins, ...mcps].sort(compareResources),
+      notices,
+    };
   }
 
   async resolveEffective(
@@ -590,13 +597,34 @@ async function discoverPlugins(
   context: ScanContext,
   detection: ProviderDetection,
   roots: ReadonlyArray<readonly [string, string]>,
+  notices: ScanNotice[],
 ): Promise<ResourceRecord[]> {
-  const payload = runJsonCommand(
+  const outcome = await runNativeJson(
     detection.executablePath,
     ["plugin", "list", "--json"],
     context,
   );
+  if (!outcome.ok) {
+    notices.push(
+      nativeNotice(
+        "claude",
+        "claude plugin list --json",
+        outcome,
+        "Claude Code plugin evidence",
+      ),
+    );
+    return [];
+  }
+  const payload = outcome.payload;
   if (!Array.isArray(payload)) {
+    notices.push(
+      nativeNotice(
+        "claude",
+        "claude plugin list --json",
+        { ok: false, failure: "malformed-json", detail: "unexpected JSON shape" },
+        "Claude Code plugin evidence",
+      ),
+    );
     return [];
   }
   const rows: Array<{

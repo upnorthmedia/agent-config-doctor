@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
@@ -11,50 +11,161 @@ import type {
   ProviderId,
   ResourceKind,
   ResourceReach,
+  ScanNotice,
 } from "../core/schema.ts";
+
+/**
+ * Budget for one native inspection command. A cold provider start can take
+ * several seconds (a cold `codex plugin list --json` was measured at about
+ * 10.6 seconds), so the budget is generous and the command runs
+ * asynchronously so other providers keep scanning meanwhile.
+ */
+export const NATIVE_COMMAND_TIMEOUT_MS = 15_000;
 
 export interface CommandResult {
   status: number | null;
   stdout: string;
+  timedOut: boolean;
+  /** Set when the process could not be started at all. */
+  spawnError?: string;
 }
 
 export function runCommand(
   executablePath: string,
   args: string[],
   context: ScanContext,
-  timeout = 5_000,
-): CommandResult {
-  const result = spawnSync(executablePath, args, {
-    cwd: context.workingDirectory,
-    encoding: "utf8",
-    env: { ...process.env, ...context.environment },
-    timeout,
-    maxBuffer: 10 * 1024 * 1024,
+  timeout = context.nativeCommandTimeoutMs ?? NATIVE_COMMAND_TIMEOUT_MS,
+): Promise<CommandResult> {
+  return new Promise((resolve) => {
+    execFile(
+      executablePath,
+      args,
+      {
+        cwd: context.workingDirectory,
+        encoding: "utf8",
+        env: { ...process.env, ...context.environment },
+        timeout,
+        killSignal: "SIGKILL",
+        maxBuffer: 10 * 1024 * 1024,
+      },
+      (error, stdout) => {
+        const output = typeof stdout === "string" ? stdout : "";
+        if (!error) {
+          resolve({ status: 0, stdout: output, timedOut: false });
+          return;
+        }
+        const failure = error as NodeJS.ErrnoException & {
+          killed?: boolean;
+          signal?: NodeJS.Signals | null;
+        };
+        if (typeof failure.code === "string") {
+          resolve({
+            status: null,
+            stdout: output,
+            timedOut: false,
+            spawnError: failure.code,
+          });
+          return;
+        }
+        resolve({
+          status: typeof failure.code === "number" ? failure.code : null,
+          stdout: output,
+          timedOut: failure.killed === true && failure.signal === "SIGKILL",
+        });
+      },
+    );
   });
-
-  return {
-    status: result.status,
-    stdout: typeof result.stdout === "string" ? result.stdout : "",
-  };
 }
 
-export function runJsonCommand(
+export type NativeFailure =
+  | "timeout"
+  | "nonzero-exit"
+  | "malformed-json"
+  | "unavailable";
+
+export type NativeJsonOutcome =
+  | { ok: true; payload: unknown }
+  | { ok: false; failure: NativeFailure; detail: string };
+
+/**
+ * Runs a read-only native listing command and classifies every way it can
+ * fail. Callers must never treat a failure as an empty successful result.
+ */
+export async function runNativeJson(
   executablePath: string | undefined,
   args: string[],
   context: ScanContext,
-): unknown {
+): Promise<NativeJsonOutcome> {
   if (!executablePath) {
-    return undefined;
+    return { ok: false, failure: "unavailable", detail: "no executable path" };
   }
-  const result = runCommand(executablePath, args, context);
+  const timeout = context.nativeCommandTimeoutMs ?? NATIVE_COMMAND_TIMEOUT_MS;
+  const result = await runCommand(executablePath, args, context, timeout);
+  if (result.spawnError) {
+    return { ok: false, failure: "unavailable", detail: result.spawnError };
+  }
+  if (result.timedOut) {
+    return {
+      ok: false,
+      failure: "timeout",
+      detail: `no result within ${formatSeconds(timeout)}`,
+    };
+  }
   if (result.status !== 0) {
-    return undefined;
+    return {
+      ok: false,
+      failure: "nonzero-exit",
+      detail: `exit status ${result.status ?? "unknown"}`,
+    };
   }
   try {
-    return JSON.parse(result.stdout);
+    return { ok: true, payload: JSON.parse(result.stdout) };
   } catch {
-    return undefined;
+    return { ok: false, failure: "malformed-json", detail: "output was not JSON" };
   }
+}
+
+export function nativeNotice(
+  provider: ProviderId,
+  command: string,
+  outcome: Extract<NativeJsonOutcome, { ok: false }>,
+  evidence: string,
+): ScanNotice {
+  const label = providerLabel(provider);
+  const messages: Record<NativeFailure, string> = {
+    timeout: `"${command}" timed out (${outcome.detail}). ${evidence} from this scan is incomplete.`,
+    "nonzero-exit": `"${command}" failed (${outcome.detail}). ${evidence} from this scan is incomplete.`,
+    "malformed-json": `"${command}" returned output that could not be parsed (${outcome.detail}). ${evidence} from this scan is incomplete.`,
+    unavailable: `"${command}" could not be started (${outcome.detail}). ${evidence} from this scan is incomplete.`,
+  };
+  const remediations: Record<NativeFailure, string> = {
+    timeout: `Rerun the scan (agent-config-doctor scan <path> --json, or relaunch the dashboard). A cold ${label} start can exceed the budget; confirm "${command}" completes in a terminal.`,
+    "nonzero-exit": `Run "${command}" in a terminal to see the ${label} error, then rerun the scan.`,
+    "malformed-json": `Run "${command}" in a terminal and check its output, then rerun the scan.`,
+    unavailable: `Confirm the ${label} executable is on PATH and runnable, then rerun the scan.`,
+  };
+  return {
+    code: `native.command.${outcome.failure}`,
+    provider,
+    command,
+    message: messages[outcome.failure],
+    remediation: remediations[outcome.failure],
+  };
+}
+
+export function providerLabel(provider: ProviderId): string {
+  return {
+    claude: "Claude Code",
+    codex: "Codex",
+    grok: "Grok Build",
+    opencode: "OpenCode",
+    hermes: "Hermes",
+  }[provider];
+}
+
+function formatSeconds(milliseconds: number): string {
+  const seconds = milliseconds / 1000;
+  return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)} s`;
 }
 
 export function parseSemanticVersion(output: unknown): string {

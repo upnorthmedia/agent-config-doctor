@@ -1,0 +1,9 @@
+#!/usr/bin/env node
+
+// Reports a supported version, then fails every native listing command.
+if (process.argv.includes("--version")) {
+  process.stdout.write("codex-cli 0.117.0-alpha.15\n");
+  process.exit(0);
+}
+process.stderr.write("fixture: native listing unavailable\n");
+process.exit(3);
