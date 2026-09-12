@@ -115,3 +115,22 @@ test("preserves Grok compatibility, trust, policy, and plugin ownership", async 
   assert.equal(serialized.includes("fixture-sensitive"), false);
   assert.equal(serialized.includes("fixture-password"), false);
 });
+
+test("keeps repository files project-scoped when the repository lives under the home directory", async () => {
+  const context: ScanContext = {
+    ...createContext(),
+    homeDirectory: fixtureRoot,
+  };
+  const snapshot = await scanProvider(new GrokAdapter(), context);
+  const rootInstruction = snapshot.effective.resources.find(
+    (resource) => resource.displayPath === "$REPO/AGENTS.md",
+  );
+  const offChainInstruction = snapshot.effective.resources.find(
+    (resource) => resource.displayPath === "$REPO/packages/web/AGENTS.md",
+  );
+
+  assert.equal(rootInstruction?.scope, "project");
+  assert.equal(rootInstruction?.reach, "chain");
+  assert.equal(offChainInstruction?.scope, "project");
+  assert.equal(offChainInstruction?.reach, "repository");
+});

@@ -27,6 +27,8 @@ export type ResourceState =
   | "invalid"
   | "unavailable";
 
+export type ResourceReach = "chain" | "repository";
+
 export type EvidenceType = "native" | "parsed" | "inferred";
 export type FindingSeverity = "info" | "warning" | "error";
 export type FindingConfidence = "low" | "medium" | "high";
@@ -63,6 +65,7 @@ export interface ResourceRecord {
   owner: ResourceOwner;
   path?: string;
   displayPath?: string;
+  reach?: ResourceReach;
   state: ResourceState;
   precedence: Record<string, JsonValue>;
   evidenceType: EvidenceType;

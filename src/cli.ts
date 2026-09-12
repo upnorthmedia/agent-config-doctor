@@ -73,13 +73,17 @@ function writeDoctorSummary(scan: CoordinatedScan): void {
   for (const finding of scan.report.findings) {
     counts[finding.severity] += 1;
   }
+  const elsewhere = scan.report.resources.filter(
+    (resource) => resource.reach === "repository",
+  ).length;
+  const installed = scan.report.resources.length - elsewhere;
 
   process.stdout.write(
     [
       "Agent Config Doctor",
       "",
       `Providers: ${detected} detected, ${unavailable} unavailable`,
-      `Resources: ${scan.report.resources.length} installed`,
+      `Resources: ${installed} installed, ${elsewhere} elsewhere in repository`,
       `Findings: ${formatCount(counts.error, "error")}, ${formatCount(counts.warning, "warning")}, ${counts.info} info`,
       "",
       "",
@@ -141,7 +145,6 @@ async function serveDashboard(
   const editor = selectGuiEditor(options.editorOverride, editors);
   const server = await startDashboardServer({
     initialScan: scan,
-    scanWorkingDirectory: scanPath,
     ...(editor ? { editor } : {}),
   });
   const shutdown = waitForShutdown();

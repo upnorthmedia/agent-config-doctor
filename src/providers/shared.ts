@@ -10,6 +10,7 @@ import type {
   JsonValue,
   ProviderId,
   ResourceKind,
+  ResourceReach,
 } from "../core/schema.ts";
 
 export interface CommandResult {
@@ -94,33 +95,90 @@ export async function readYamlFile(candidate: string): Promise<unknown> {
   }
 }
 
+/**
+ * Directory names that the repository walker never descends into. They hold
+ * version-control internals, dependency trees, or build output that no
+ * supported provider reads configuration from.
+ */
+export const GENERATED_DIRECTORY_NAMES: ReadonlySet<string> = new Set([
+  ".git",
+  ".hg",
+  ".svn",
+  "node_modules",
+  "dist",
+  "build",
+  "coverage",
+  ".venv",
+  "venv",
+  "__pycache__",
+  ".cache",
+  ".next",
+  ".turbo",
+  ".tox",
+  ".mypy_cache",
+  ".pytest_cache",
+]);
+
+/**
+ * The one shared recursive walker. It reports files accepted by the predicate,
+ * skips generated directories, and does not follow directory symlinks so that
+ * linked trees cannot create cycles or reach outside the walked root.
+ */
+export async function walkFiles(
+  root: string,
+  accept: (name: string, candidate: string) => boolean,
+): Promise<string[]> {
+  let entries;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const files: string[] = [];
+
+  for (const entry of entries) {
+    if (GENERATED_DIRECTORY_NAMES.has(entry.name)) {
+      continue;
+    }
+    const candidate = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await walkFiles(candidate, accept)));
+    } else if (
+      (entry.isFile() || entry.isSymbolicLink()) &&
+      accept(entry.name, candidate)
+    ) {
+      files.push(candidate);
+    }
+  }
+
+  return files.sort();
+}
+
 export async function findNamedFiles(
   root: string,
   names: ReadonlySet<string>,
 ): Promise<string[]> {
-  try {
-    const entries = await readdir(root, { withFileTypes: true });
-    const files: string[] = [];
+  return walkFiles(root, (name) => names.has(name));
+}
 
-    for (const entry of entries) {
-      if (entry.name === ".git" || entry.name === "node_modules") {
-        continue;
-      }
-      const candidate = path.join(root, entry.name);
-      if (entry.isDirectory()) {
-        files.push(...(await findNamedFiles(candidate, names)));
-      } else if (
-        (entry.isFile() || entry.isSymbolicLink()) &&
-        names.has(entry.name)
-      ) {
-        files.push(candidate);
-      }
-    }
-
-    return files.sort();
-  } catch {
-    return [];
+/**
+ * Whether a repository directory belongs to the selected working directory's
+ * real ancestor chain. Files outside that chain are still inventory, but they
+ * are reported with `reach: "repository"` and never take part in the
+ * effective configuration.
+ */
+export function reachForDirectory(
+  directory: string,
+  context: ScanContext,
+): ResourceReach {
+  if (!isWithin(context.repositoryPath, directory)) {
+    return "chain";
   }
+  const resolved = path.resolve(directory);
+  return directoriesFromRoot(context.repositoryPath, context.workingDirectory)
+    .some((candidate) => candidate === resolved)
+    ? "chain"
+    : "repository";
 }
 
 export async function findSkillFiles(root: string): Promise<string[]> {

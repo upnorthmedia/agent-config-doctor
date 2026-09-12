@@ -26,6 +26,7 @@ import {
   isRecord,
   parseSemanticVersion,
   parseSkillFrontmatter,
+  reachForDirectory,
   readJsonFile,
   resourceId,
   runCommand,
@@ -314,6 +315,7 @@ async function createInstructionResource(
     owner: inAdmin ? { type: "administrator" } : { type: "self" },
     path: await canonicalPath(candidate),
     displayPath: shownPath,
+    reach: inAdmin || inUser ? "chain" : reachForDirectory(loadDirectory, context),
     state: "inactive",
     precedence: {},
     evidenceType: "parsed",
@@ -361,6 +363,7 @@ async function discoverImports(
         origin: "instruction-import",
         owner: parent.owner,
         displayPath: shownPath,
+        ...(parent.reach ? { reach: parent.reach } : {}),
         state: "unavailable",
         precedence: {},
         evidenceType: "parsed",
@@ -400,6 +403,7 @@ async function discoverImports(
       owner: parent.owner,
       path: canonical,
       displayPath: shownPath,
+      ...(parent.reach ? { reach: parent.reach } : {}),
       state: "inactive",
       precedence: {},
       evidenceType: "parsed",
@@ -463,6 +467,7 @@ async function discoverSkills(
     rank: number;
     eligible: boolean;
     owner: ResourceRecord["owner"];
+    reach?: ResourceRecord["reach"];
   }> = [];
 
   for (const skillPath of await findSkillFiles(path.join(adminRoot, "skills"))) {
@@ -498,6 +503,7 @@ async function discoverSkills(
       rank: 100 + Math.max(depth, 0),
       eligible: depth >= 0,
       owner: { type: "self" },
+      reach: reachForDirectory(scopeDirectory, context),
     });
   }
 
@@ -512,6 +518,7 @@ async function discoverSkills(
         location.origin,
         location.owner,
         location.eligible ? "active" : "inactive",
+        location.reach,
       ),
       rank: location.rank,
       eligible: location.eligible,
@@ -536,6 +543,7 @@ async function createSkillResource(
   origin: string,
   owner: ResourceRecord["owner"],
   state: ResourceState,
+  reach?: ResourceRecord["reach"],
 ): Promise<ResourceRecord> {
   const contents = await readFile(skillPath, "utf8");
   const parsed = parseSkillFrontmatter(contents);
@@ -565,6 +573,7 @@ async function createSkillResource(
     owner,
     path: await canonicalPath(skillPath),
     displayPath: shownPath,
+    ...(reach ? { reach } : {}),
     state: findings.length > 0 ? "invalid" : state,
     precedence: {},
     evidenceType: "parsed",

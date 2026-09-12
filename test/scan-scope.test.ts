@@ -1,0 +1,169 @@
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { test, type TestContext } from "node:test";
+import { fileURLToPath } from "node:url";
+
+import { scanProviders } from "../src/core/coordinator.ts";
+import type { ScanContext } from "../src/core/provider-adapter.ts";
+import { scanProvider } from "../src/core/scanner.ts";
+import { ClaudeAdapter } from "../src/providers/claude.ts";
+import { CodexAdapter } from "../src/providers/codex.ts";
+import { GrokAdapter } from "../src/providers/grok.ts";
+import { HermesAdapter } from "../src/providers/hermes.ts";
+import { OpenCodeAdapter } from "../src/providers/opencode.ts";
+import {
+  GENERATED_DIRECTORY_NAMES,
+  findNamedFiles,
+  reachForDirectory,
+} from "../src/providers/shared.ts";
+
+const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
+const codexFixture = path.join(repositoryRoot, "test", "fixtures", "codex", "instruction-chain");
+const claudeFixture = path.join(repositoryRoot, "test", "fixtures", "claude", "provider");
+const hermesFixture = path.join(repositoryRoot, "test", "fixtures", "hermes", "provider");
+const grokFixture = path.join(repositoryRoot, "test", "fixtures", "grok", "provider");
+const opencodeFixture = path.join(repositoryRoot, "test", "fixtures", "opencode", "provider");
+
+async function selfScanContext(
+  t: TestContext,
+  workingDirectory = repositoryRoot,
+): Promise<ScanContext> {
+  // The home directory lives outside the repository so every fixture home is
+  // discovered the way a real self-scan discovers it: through the repository walk.
+  const homeDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-config-self-home-"));
+  t.after(() => rm(homeDirectory, { recursive: true, force: true }));
+  return {
+    homeDirectory,
+    repositoryPath: repositoryRoot,
+    workingDirectory,
+    environment: {
+      CODEX_HOME: path.join(homeDirectory, ".codex"),
+      HERMES_HOME: path.join(homeDirectory, ".hermes"),
+      HERMES_FIXTURE_EXTERNAL: path.join(hermesFixture, "external", "skills"),
+    },
+    executables: {
+      claude: path.join(claudeFixture, "bin", "claude"),
+      codex: path.join(codexFixture, "bin", "codex"),
+      grok: path.join(grokFixture, "bin", "grok"),
+      opencode: path.join(opencodeFixture, "bin", "opencode-legacy"),
+      hermes: path.join(hermesFixture, "bin", "hermes"),
+    },
+    adminRoots: {
+      claude: path.join(claudeFixture, "admin", "claude"),
+      codex: path.join(codexFixture, "admin", "codex"),
+    },
+  };
+}
+
+test("scanning this repository keeps fixture resources out of the effective chain", async (t) => {
+  const adapters = [
+    new ClaudeAdapter(),
+    new CodexAdapter(),
+    new GrokAdapter(),
+    new OpenCodeAdapter(),
+    new HermesAdapter(),
+  ];
+  const scan = await scanProviders(adapters, await selfScanContext(t));
+  // Fixture executables natively report plugins that live inside the fixture
+  // trees. Native listings are authoritative wherever their files live, so the
+  // gate covers everything the repository walk discovered on its own.
+  const fixtureResources = scan.report.resources.filter(
+    (resource) =>
+      resource.displayPath?.startsWith("$REPO/test/fixtures/") &&
+      resource.evidenceType !== "native" &&
+      resource.owner.type !== "plugin",
+  );
+  const effectiveIds = new Set(
+    Object.values(scan.report.effective).flatMap((effective) => [
+      ...effective.orderedResourceIds,
+      ...effective.decisions.map((decision) => decision.resourceId),
+    ]),
+  );
+
+  assert.ok(fixtureResources.length > 0, "fixtures stay visible in inventory");
+  for (const resource of fixtureResources) {
+    assert.equal(resource.reach, "repository", resource.displayPath);
+    assert.notEqual(resource.state, "active", resource.displayPath);
+    assert.equal(effectiveIds.has(resource.id), false, resource.displayPath);
+  }
+  assert.ok(
+    scan.report.resources.some(
+      (resource) => resource.reach === "chain" && resource.state === "active",
+    ),
+  );
+  for (const resource of scan.report.resources) {
+    assert.ok(
+      resource.reach === "chain" || resource.reach === "repository",
+      `${resource.displayPath ?? resource.name} has no reach`,
+    );
+  }
+});
+
+test("nested synthetic homes stay visible as repository inventory instead of being hidden", async (t) => {
+  const snapshot = await scanProvider(new CodexAdapter(), await selfScanContext(t));
+  const nestedHomeInstruction = snapshot.effective.resources.find(
+    (resource) =>
+      resource.displayPath ===
+      "$REPO/test/fixtures/codex/instruction-chain/home/.codex/AGENTS.md",
+  );
+
+  assert.ok(nestedHomeInstruction, "nested home instruction is discovered");
+  assert.equal(nestedHomeInstruction.reach, "repository");
+  assert.equal(nestedHomeInstruction.state, "inactive");
+});
+
+test("walker skips generated directories and reports the ancestor chain", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "agent-config-walker-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const generated = ["node_modules/dep", "dist", "build", "coverage", ".venv", "__pycache__", ".git/info"];
+  for (const directory of [...generated, "packages/api", "packages/web"]) {
+    await mkdir(path.join(root, directory), { recursive: true });
+    await writeFile(path.join(root, directory, "AGENTS.md"), "# nested\n", "utf8");
+  }
+  await writeFile(path.join(root, "AGENTS.md"), "# root\n", "utf8");
+
+  const found = await findNamedFiles(root, new Set(["AGENTS.md"]));
+
+  assert.deepEqual(found, [
+    path.join(root, "AGENTS.md"),
+    path.join(root, "packages", "api", "AGENTS.md"),
+    path.join(root, "packages", "web", "AGENTS.md"),
+  ]);
+  assert.ok(GENERATED_DIRECTORY_NAMES.has("node_modules"));
+  assert.ok(GENERATED_DIRECTORY_NAMES.has(".git"));
+  const context: ScanContext = {
+    homeDirectory: os.homedir(),
+    repositoryPath: root,
+    workingDirectory: path.join(root, "packages", "api"),
+    environment: {},
+  };
+  assert.equal(reachForDirectory(root, context), "chain");
+  assert.equal(reachForDirectory(path.join(root, "packages", "api"), context), "chain");
+  assert.equal(reachForDirectory(path.join(root, "packages", "web"), context), "repository");
+  assert.equal(reachForDirectory(os.homedir(), context), "chain");
+});
+
+test("discovers Codex system skills as provider-owned resources", async () => {
+  const context: ScanContext = {
+    homeDirectory: path.join(codexFixture, "home"),
+    repositoryPath: path.join(codexFixture, "repo"),
+    workingDirectory: path.join(codexFixture, "repo"),
+    environment: { CODEX_HOME: path.join(codexFixture, "home", ".codex") },
+    executables: { codex: path.join(codexFixture, "bin", "codex") },
+  };
+  const snapshot = await scanProvider(new CodexAdapter(), context);
+  const systemSkill = snapshot.effective.resources.find(
+    (resource) =>
+      resource.displayPath === "$CODEX_HOME/skills/.system/system-skill/SKILL.md",
+  );
+
+  assert.ok(systemSkill, "system skill is discovered");
+  assert.equal(systemSkill.kind, "skill");
+  assert.equal(systemSkill.origin, "codex-system");
+  assert.equal(systemSkill.scope, "bundled");
+  assert.deepEqual(systemSkill.owner, { type: "provider", id: "codex" });
+  assert.equal(systemSkill.state, "active");
+  assert.equal(systemSkill.reach, "chain");
+});

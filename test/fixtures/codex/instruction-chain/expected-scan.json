@@ -135,6 +135,16 @@
     },
     {
       "kind": "skill",
+      "name": "system-skill",
+      "path": "$CODEX_HOME/skills/.system/system-skill/SKILL.md",
+      "scope": "bundled",
+      "origin": "codex-system",
+      "owner": "provider:codex",
+      "state": "active",
+      "evidence": "parsed:file:$CODEX_HOME/skills/.system/system-skill/SKILL.md"
+    },
+    {
+      "kind": "skill",
       "name": "shared-skill",
       "path": "$CODEX_HOME/skills/shared-skill/SKILL.md",
       "scope": "user",

@@ -46,13 +46,13 @@ export function dashboardDocument(): string {
         <div class="view-heading">
           <div>
             <h1>Configuration at a glance</h1>
-            <p>One scan across installed harnesses, normalized without hiding provider differences.</p>
+            <p>One scan across installed harnesses, normalized without hiding provider differences. Totals cover the selected working directory and its ancestors; everything else found in the repository is listed separately in the inventory.</p>
           </div>
           <span class="scan-time" id="scan-time">Scanning</span>
         </div>
         <div class="summary-band" aria-label="Inventory summary">
           <div><strong id="summary-providers">0</strong><span>detected providers</span></div>
-          <div><strong id="summary-resources">0</strong><span>installed resources</span></div>
+          <div><strong id="summary-resources">0</strong><span>resources in this context</span></div>
           <div><strong id="summary-active">0</strong><span>active resources</span></div>
           <div><strong id="summary-findings">0</strong><span>high confidence findings</span></div>
         </div>
@@ -95,7 +95,7 @@ export function dashboardDocument(): string {
         </div>
         <div class="context-controls">
           <label><span>Provider</span><select id="effective-provider"></select></label>
-          <label class="cwd-control"><span>Working directory</span><select id="working-directory"></select></label>
+          <div class="cwd-control"><span>Working directory</span><code id="working-directory"></code></div>
         </div>
         <div class="effective-summary" id="effective-summary"></div>
         <div class="effective-list" id="effective-list"></div>
@@ -263,7 +263,8 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 
 .filter-bar, .context-controls { display: grid; grid-template-columns: minmax(240px, 1.5fr) repeat(3, minmax(130px, 0.65fr)); gap: 10px; margin-bottom: 20px; padding: 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
 .context-controls { grid-template-columns: minmax(180px, 0.6fr) minmax(280px, 1.4fr); }
-.filter-bar label, .context-controls label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.045em; }
+.filter-bar label, .context-controls label, .context-controls .cwd-control { display: grid; gap: 5px; color: var(--muted); font-size: 10px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.045em; }
+.cwd-control code { display: flex; align-items: center; min-height: 34px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); color: var(--text); font: 12px ui-monospace, "SFMono-Regular", Consolas, monospace; text-transform: none; letter-spacing: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 input, select { width: 100%; min-height: 34px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); color: var(--text); outline: none; }
 input::placeholder { color: var(--muted); }
 input:hover, select:hover { border-color: var(--border-strong); }
@@ -440,6 +441,14 @@ export const dashboardClientScript = String.raw`
     return state.report.resources.find((resource) => resource.id === id);
   }
 
+  function inContext(resource) {
+    return resource.reach !== "repository";
+  }
+
+  function contextResources() {
+    return state.report.resources.filter(inContext);
+  }
+
   function switchView(view) {
     if (view === "detail" && !state.selectedResourceId) return;
     state.view = view;
@@ -475,7 +484,7 @@ export const dashboardClientScript = String.raw`
   }
 
   function renderOverview() {
-    const resources = state.report.resources;
+    const resources = contextResources();
     const active = resources.filter((resource) => resource.state === "active").length;
     const highConfidence = state.report.findings.filter((finding) => finding.confidence === "high");
     const detected = state.report.providers.filter((provider) => provider.installed).length;
@@ -488,7 +497,7 @@ export const dashboardClientScript = String.raw`
       ? "Scan complete"
       : "Scanned " + scannedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
     byId("header-context").textContent = state.report.subject.workingDirectory;
-    byId("new-user-empty").hidden = resources.length !== 0;
+    byId("new-user-empty").hidden = state.report.resources.length !== 0;
     renderBreakdown("kind-breakdown", resources, "kind");
     renderBreakdown("state-breakdown", resources, "state");
 
@@ -556,11 +565,19 @@ export const dashboardClientScript = String.raw`
       return;
     }
 
+    const elsewhereLabel = "Elsewhere in repository";
     const groups = new Map();
     for (const resource of filtered) {
-      const key = resource.owner.type === "plugin" ? "Plugin: " + (resource.owner.id || "unknown") : "Standalone resources";
+      const key = !inContext(resource)
+        ? elsewhereLabel
+        : resource.owner.type === "plugin" ? "Plugin: " + (resource.owner.id || "unknown") : "Standalone resources";
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(resource);
+    }
+    if (groups.has(elsewhereLabel)) {
+      const elsewhere = groups.get(elsewhereLabel);
+      groups.delete(elsewhereLabel);
+      groups.set(elsewhereLabel, elsewhere);
     }
     for (const [label, resources] of groups) {
       const group = element("section", "inventory-group");
@@ -581,7 +598,7 @@ export const dashboardClientScript = String.raw`
       element("span", "resource-kind", resource.kind),
       element("span", "resource-scope", resource.scope),
       element("span", "resource-path", resource.displayPath || "No file path"),
-      statusBadge(resource.state),
+      statusBadge(inContext(resource) ? resource.state : "elsewhere"),
     );
     row.addEventListener("click", () => selectResource(resource.id));
     return row;
@@ -681,6 +698,7 @@ export const dashboardClientScript = String.raw`
       detailPair("Provider", providerLabel(resource.provider) + " " + resource.providerVersion),
       detailPair("Kind", resource.kind),
       detailPair("Scope", resource.scope),
+      detailPair("Reach", inContext(resource) ? "In the selected context chain" : "Elsewhere in repository"),
       detailPair("State", resource.state),
       detailPair("Origin", resource.origin),
       detailPair("Owner", resource.owner.id || resource.owner.type),
@@ -711,14 +729,7 @@ export const dashboardClientScript = String.raw`
     const previousProvider = providerSelect.value;
     fillSelect(providerSelect, state.report.providers.map((provider) => ({ value: provider.provider, label: providerLabel(provider.provider) })), null);
     if (previousProvider && state.report.effective[previousProvider]) providerSelect.value = previousProvider;
-    const cwd = byId("working-directory");
-    cwd.replaceChildren();
-    for (const optionValue of state.options.workingDirectories) {
-      const option = element("option", "", optionValue.displayPath);
-      option.value = optionValue.id;
-      option.selected = optionValue.id === state.options.selectedWorkingDirectoryId;
-      cwd.append(option);
-    }
+    byId("working-directory").textContent = state.options.workingDirectory;
   }
 
   function renderAll() {
@@ -729,24 +740,6 @@ export const dashboardClientScript = String.raw`
     renderEffective();
     renderFindings();
     if (state.selectedResourceId) renderDetail();
-  }
-
-  async function changeWorkingDirectory(event) {
-    const id = event.target.value;
-    try {
-      const payload = await api("/api/actions/select-working-directory", {
-        method: "POST",
-        body: JSON.stringify({ workingDirectoryId: id }),
-      });
-      state.report = payload.report;
-      state.options = payload.options;
-      state.selectedResourceId = null;
-      byId("detail-nav").disabled = true;
-      renderAll();
-      toast("Effective configuration updated.");
-    } catch (error) {
-      showError(error);
-    }
   }
 
   async function resourceAction(action) {
@@ -775,7 +768,6 @@ export const dashboardClientScript = String.raw`
     byId(id).addEventListener(id === "inventory-search" ? "input" : "change", renderInventory);
   });
   byId("effective-provider").addEventListener("change", renderEffective);
-  byId("working-directory").addEventListener("change", changeWorkingDirectory);
   byId("copy-path").addEventListener("click", () => resourceAction("copy"));
   byId("reveal-resource").addEventListener("click", () => resourceAction("reveal"));
   byId("open-resource").addEventListener("click", () => resourceAction("open"));

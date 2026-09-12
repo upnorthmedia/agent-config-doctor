@@ -3,6 +3,7 @@ import path from "node:path";
 
 import type { ProviderAdapter, ScanContext } from "./provider-adapter.ts";
 import type {
+  EffectiveConfiguration,
   JsonValue,
   PublicResourceRecord,
   ScanReport,
@@ -15,10 +16,8 @@ export async function scanProvider(
 ): Promise<ScanSnapshot> {
   const detection = await adapter.detect(context);
   const installed = await adapter.discover(context, detection);
-  const effective = await adapter.resolveEffective(
-    context,
-    installed,
-    detection,
+  const effective = scopeToAncestorChain(
+    await adapter.resolveEffective(context, installed, detection),
   );
   const findings = [
     ...detectionFindings(detection),
@@ -29,6 +28,44 @@ export async function scanProvider(
     detection,
     effective,
     findings,
+  };
+}
+
+/**
+ * Effective configuration is built only from the selected directory's real
+ * ancestor chain. Resources discovered elsewhere in the repository stay in
+ * inventory with `reach: "repository"`, but they never become active and they
+ * are not part of the ordered chain or the effective decisions.
+ */
+function scopeToAncestorChain(
+  effective: EffectiveConfiguration,
+): EffectiveConfiguration {
+  const resources = effective.resources.map((resource) => {
+    const reach = resource.reach ?? "chain";
+    return {
+      ...resource,
+      reach,
+      state:
+        reach === "repository" && resource.state === "active"
+          ? ("inactive" as const)
+          : resource.state,
+    };
+  });
+  const offChain = new Set(
+    resources
+      .filter((resource) => resource.reach === "repository")
+      .map((resource) => resource.id),
+  );
+
+  return {
+    ...effective,
+    resources,
+    orderedResourceIds: effective.orderedResourceIds.filter(
+      (id) => !offChain.has(id),
+    ),
+    decisions: effective.decisions.filter(
+      (decision) => !offChain.has(decision.resourceId),
+    ),
   };
 }
 

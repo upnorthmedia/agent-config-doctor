@@ -27,6 +27,7 @@ import {
   isFile,
   isRecord,
   parseSkillFrontmatter,
+  reachForDirectory,
   readJsonFile,
   readYamlFile,
   resourceId,
@@ -34,6 +35,7 @@ import {
   sanitizeTransport,
   stringArray,
   stringValue,
+  walkFiles,
 } from "./shared.ts";
 
 const CONTEXT_NAMES = new Set([
@@ -275,6 +277,11 @@ async function discoverInstructions(
     const isSoul = path.resolve(candidate) === path.join(hermesHome, "SOUL.md");
     const shownPath = displayPath(candidate, context, [["$HERMES_HOME", hermesHome]]);
     const id = resourceId("hermes", "instruction", shownPath);
+    // Cursor rules live in <project>/.cursor/rules, so the project directory
+    // that owns them decides whether they sit in the selected chain.
+    const ownerDirectory = candidate.endsWith(".mdc")
+      ? path.dirname(path.dirname(path.dirname(candidate)))
+      : path.dirname(candidate);
     resources.push({
       id,
       kind: "instruction",
@@ -290,6 +297,7 @@ async function discoverInstructions(
       owner: { type: "self" },
       path: await canonicalPath(candidate),
       displayPath: shownPath,
+      reach: isSoul ? "chain" : reachForDirectory(ownerDirectory, context),
       state: "inactive",
       precedence: {},
       evidenceType: "parsed",
@@ -306,36 +314,14 @@ async function discoverInstructions(
   return resources;
 }
 
-async function findCursorRules(root: string): Promise<string[]> {
-  const files: string[] = [];
-
-  async function walk(directory: string): Promise<void> {
-    let entries;
-    try {
-      entries = await readdir(directory, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      if (entry.name === ".git" || entry.name === "node_modules") {
-        continue;
-      }
-      const candidate = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
-        await walk(candidate);
-      } else if (
-        entry.isFile() &&
-        entry.name.endsWith(".mdc") &&
-        path.basename(path.dirname(candidate)) === "rules" &&
-        path.basename(path.dirname(path.dirname(candidate))) === ".cursor"
-      ) {
-        files.push(candidate);
-      }
-    }
-  }
-
-  await walk(root);
-  return files.sort();
+function findCursorRules(root: string): Promise<string[]> {
+  return walkFiles(
+    root,
+    (name, candidate) =>
+      name.endsWith(".mdc") &&
+      path.basename(path.dirname(candidate)) === "rules" &&
+      path.basename(path.dirname(path.dirname(candidate))) === ".cursor",
+  );
 }
 
 function contextPriority(name: string): number {

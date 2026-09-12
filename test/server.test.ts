@@ -128,164 +128,63 @@ test("protects local data with a per-process credential and restrictive headers"
   assert.equal(Number.isNaN(Date.parse(publicOptions.scannedAt)), false);
 });
 
-test("rescans an allowed working directory through its opaque session ID", async (t) => {
-  const homeDirectory = path.join(fixtureRoot, "home");
-  const repositoryPath = path.join(fixtureRoot, "repo");
-  const baseContext: ScanContext = {
-    homeDirectory,
-    repositoryPath,
-    workingDirectory: repositoryPath,
-    environment: { CODEX_HOME: path.join(homeDirectory, ".codex") },
-    executables: { codex: path.join(fixtureRoot, "bin", "codex") },
-  };
-  const initialScan = await scanProviders([new CodexAdapter()], baseContext);
-  const server = await startDashboardServer({
-    initialScan,
-    port: 0,
-    scanWorkingDirectory: (workingDirectory) =>
-      scanProviders([new CodexAdapter()], { ...baseContext, workingDirectory }),
-  });
-  t.after(() => server.close());
-  const authorization = { Authorization: `Bearer ${server.credential}` };
-  const initial = await (
-    await fetch(`${server.origin}/api/scan`, { headers: authorization })
-  ).json() as {
-    effective: { codex: { orderedResourceIds: string[] } };
-  };
-  const scanOptions = await (
-    await fetch(`${server.origin}/api/options`, { headers: authorization })
-  ).json() as {
-    workingDirectories: Array<{ id: string; displayPath: string }>;
-  };
-  const nested = scanOptions.workingDirectories.find(
-    (candidate) => candidate.displayPath === "$REPO/packages/api",
-  );
-  assert.ok(nested);
-  assert.equal(nested.id.includes("packages/api"), false);
-
-  const getSelection = await fetch(
-    `${server.origin}/api/scan?cwd=${encodeURIComponent(nested.id)}`,
-    { headers: authorization },
-  );
-  assert.equal(getSelection.status, 400);
-
-  const invalidOrigin = await fetch(
-    `${server.origin}/api/actions/select-working-directory`,
-    {
-      method: "POST",
-      headers: { ...headers(server), Origin: "http://evil.example" },
-      body: JSON.stringify({ workingDirectoryId: nested.id }),
-    },
-  );
-  assert.equal(invalidOrigin.status, 403);
-
-  const arbitraryPath = await fetch(
-    `${server.origin}/api/actions/select-working-directory`,
-    {
-      method: "POST",
-      headers: headers(server),
-      body: JSON.stringify({ workingDirectoryId: nested.id, path: "/etc" }),
-    },
-  );
-  assert.equal(arbitraryPath.status, 400);
-
-  const response = await fetch(
-    `${server.origin}/api/actions/select-working-directory`,
-    {
-      method: "POST",
-      headers: headers(server),
-      body: JSON.stringify({ workingDirectoryId: nested.id }),
-    },
-  );
-  assert.equal(response.status, 200);
-  const changed = await response.json() as {
-    report: {
-      subject: { workingDirectory: string };
-      effective: { codex: { orderedResourceIds: string[] } };
-    };
-    options: { selectedWorkingDirectoryId: string };
-  };
-  assert.equal(changed.report.subject.workingDirectory, "$REPO/packages/api");
-  assert.notDeepEqual(
-    changed.report.effective.codex.orderedResourceIds,
-    initial.effective.codex.orderedResourceIds,
-  );
-  assert.equal(changed.options.selectedWorkingDirectoryId, nested.id);
-
-  const forged = await fetch(
-    `${server.origin}/api/actions/select-working-directory`,
-    {
-      method: "POST",
-      headers: headers(server),
-      body: JSON.stringify({ workingDirectoryId: "forged-cwd-id" }),
-    },
-  );
-  assert.equal(forged.status, 400);
-});
-
-test("rejects a working directory redirected outside the repository", async (t) => {
+test("scans only the launch directory and never infers switchable working directories", async (t) => {
   const repositoryPath = await mkdtemp(
     path.join(os.tmpdir(), "agent-config-cwd-root-"),
   );
-  const outsideRoot = await mkdtemp(
-    path.join(os.tmpdir(), "agent-config-cwd-outside-"),
-  );
   const nestedPath = path.join(repositoryPath, "packages", "api");
   await mkdir(nestedPath, { recursive: true });
+  await mkdir(path.join(repositoryPath, "packages", "web"), { recursive: true });
   await writeFile(path.join(repositoryPath, "AGENTS.md"), "# Root\n", "utf8");
   await writeFile(path.join(nestedPath, "AGENTS.md"), "# Nested\n", "utf8");
-  t.after(async () => {
-    await rm(repositoryPath, { recursive: true, force: true });
-    await rm(outsideRoot, { recursive: true, force: true });
-  });
+  await writeFile(path.join(repositoryPath, "packages", "web", "AGENTS.md"), "# Web\n", "utf8");
+  t.after(() => rm(repositoryPath, { recursive: true, force: true }));
 
   const homeDirectory = path.join(fixtureRoot, "home");
-  const baseContext: ScanContext = {
+  const context: ScanContext = {
     homeDirectory,
     repositoryPath,
-    workingDirectory: repositoryPath,
+    workingDirectory: nestedPath,
     environment: { CODEX_HOME: path.join(homeDirectory, ".codex") },
     executables: { codex: path.join(fixtureRoot, "bin", "codex") },
   };
-  const initialScan = await scanProviders([new CodexAdapter()], baseContext);
-  let scannedPath: string | undefined;
-  const server = await startDashboardServer({
-    initialScan,
-    port: 0,
-    scanWorkingDirectory: async (workingDirectory) => {
-      scannedPath = workingDirectory;
-      return scanProviders([new CodexAdapter()], {
-        ...baseContext,
-        workingDirectory,
-      });
-    },
-  });
+  const initialScan = await scanProviders([new CodexAdapter()], context);
+  const server = await startDashboardServer({ initialScan, port: 0 });
   t.after(() => server.close());
-  const options = await (
-    await fetch(`${server.origin}/api/options`, {
-      headers: { Authorization: `Bearer ${server.credential}` },
-    })
-  ).json() as {
-    workingDirectories: Array<{ id: string; displayPath: string }>;
-  };
-  const nested = options.workingDirectories.find(
-    (candidate) => candidate.displayPath === "$REPO/packages/api",
-  );
-  assert.ok(nested);
+  const authorization = { Authorization: `Bearer ${server.credential}` };
 
-  await rm(nestedPath, { recursive: true });
-  await symlink(outsideRoot, nestedPath, "dir");
-  const response = await fetch(
+  const options = await (
+    await fetch(`${server.origin}/api/options`, { headers: authorization })
+  ).json() as Record<string, unknown>;
+  assert.equal(options.workingDirectory, "$REPO/packages/api");
+  assert.equal("workingDirectories" in options, false);
+  assert.equal("selectedWorkingDirectoryId" in options, false);
+
+  const report = await (
+    await fetch(`${server.origin}/api/scan`, { headers: authorization })
+  ).json() as {
+    subject: { workingDirectory: string };
+    resources: Array<{ displayPath?: string; reach?: string }>;
+  };
+  assert.equal(report.subject.workingDirectory, "$REPO/packages/api");
+  assert.equal(
+    report.resources.find((resource) => resource.displayPath === "$REPO/packages/web/AGENTS.md")?.reach,
+    "repository",
+  );
+
+  const query = await fetch(`${server.origin}/api/scan?cwd=packages`, {
+    headers: authorization,
+  });
+  assert.equal(query.status, 400);
+  const selection = await fetch(
     `${server.origin}/api/actions/select-working-directory`,
     {
       method: "POST",
       headers: headers(server),
-      body: JSON.stringify({ workingDirectoryId: nested.id }),
+      body: JSON.stringify({ workingDirectoryId: "any" }),
     },
   );
-
-  assert.equal(response.status, 409);
-  assert.equal(scannedPath, undefined);
+  assert.equal(selection.status, 404);
 });
 
 test("rejects invalid origins, arbitrary paths, and forged resource IDs over HTTP", async (t) => {

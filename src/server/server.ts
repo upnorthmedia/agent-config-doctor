@@ -1,8 +1,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { realpath, stat } from "node:fs/promises";
+import { realpath } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import path from "node:path";
 
 import type { CoordinatedScan } from "../core/coordinator.ts";
 import {
@@ -10,7 +9,7 @@ import {
   dashboardDocument,
   dashboardStyles,
 } from "../dashboard/dashboard.ts";
-import { displayRelative, isWithin } from "../providers/shared.ts";
+import { displayRelative } from "../providers/shared.ts";
 import {
   ActionError,
   LocalActionService,
@@ -41,52 +40,16 @@ export interface DashboardServer {
   close(): Promise<void>;
 }
 
-interface WorkingDirectoryOption {
-  id: string;
-  canonicalPath: string;
-  displayPath: string;
-}
-
-async function createWorkingDirectories(
-  scan: CoordinatedScan,
-): Promise<WorkingDirectoryOption[]> {
+/**
+ * The dashboard scans exactly the launch directory. Switchable working
+ * directories are never inferred from discovered resources, because arbitrary
+ * repository files (fixtures, nested synthetic homes, vendored trees) are not
+ * evidence of a project context.
+ */
+async function launchDirectoryLabel(scan: CoordinatedScan): Promise<string> {
   const repositoryPath = await realpath(scan.context.repositoryPath);
-  const candidates = new Set([
-    repositoryPath,
-    await realpath(scan.context.workingDirectory),
-  ]);
-
-  for (const snapshot of scan.snapshots) {
-    for (const resource of snapshot.effective.resources) {
-      if (resource.kind !== "instruction" || !resource.path) {
-        continue;
-      }
-      const metadataDirectory =
-        typeof resource.metadata.loadDirectory === "string"
-          ? resource.metadata.loadDirectory
-          : typeof resource.metadata.discoveredDirectory === "string"
-            ? resource.metadata.discoveredDirectory
-            : path.dirname(resource.path);
-      try {
-        const candidate = await realpath(metadataDirectory);
-        if (isWithin(repositoryPath, candidate) && (await stat(candidate)).isDirectory()) {
-          candidates.add(candidate);
-        }
-      } catch {
-        continue;
-      }
-    }
-  }
-
-  return [...candidates]
-    .map((canonicalPath) => ({
-      id: randomBytes(18).toString("base64url"),
-      canonicalPath,
-      displayPath: displayRelative("$REPO", repositoryPath, canonicalPath),
-    }))
-    .sort((left, right) =>
-      left.displayPath.localeCompare(right.displayPath),
-    );
+  const workingDirectory = await realpath(scan.context.workingDirectory);
+  return displayRelative("$REPO", repositoryPath, workingDirectory);
 }
 
 async function createLocalActions(
@@ -116,17 +79,12 @@ function publicDashboardOptions(
   state: {
     actions: LocalActionService;
     scannedAt: string;
-    selectedWorkingDirectoryId: string;
+    workingDirectory: string;
   },
-  workingDirectories: readonly WorkingDirectoryOption[],
   editor: DetectedEditor | undefined,
 ) {
   return {
-    workingDirectories: workingDirectories.map(({ id, displayPath }) => ({
-      id,
-      displayPath,
-    })),
-    selectedWorkingDirectoryId: state.selectedWorkingDirectoryId,
+    workingDirectory: state.workingDirectory,
     scannedAt: state.scannedAt,
     actionableResourceIds: state.actions.resourceIds(),
     editor: editor ? { id: editor.id, label: editor.label } : null,
@@ -139,14 +97,12 @@ export async function startDashboardServer(options: {
   port?: number;
   editor?: DetectedEditor;
   spawnProcess?: SpawnProcess;
-  scanWorkingDirectory?: (workingDirectory: string) => Promise<CoordinatedScan>;
 }): Promise<DashboardServer> {
   const host = options.host ?? "127.0.0.1";
   if (host !== "127.0.0.1") {
     throw new Error("Dashboard server must bind exclusively to 127.0.0.1.");
   }
   const credential = randomBytes(32).toString("base64url");
-  const workingDirectories = await createWorkingDirectories(options.initialScan);
   const state = {
     actions: await createLocalActions(
       options.initialScan,
@@ -155,12 +111,8 @@ export async function startDashboardServer(options: {
       options.spawnProcess,
     ),
     currentScan: options.initialScan,
-    repositoryPath: await realpath(options.initialScan.context.repositoryPath),
     scannedAt: new Date().toISOString(),
-    selectedWorkingDirectoryId: workingDirectories.find(
-      (entry) =>
-        entry.canonicalPath === options.initialScan.context.workingDirectory,
-    )?.id ?? workingDirectories[0]!.id,
+    workingDirectory: await launchDirectoryLabel(options.initialScan),
   };
   let origin = "";
 
@@ -172,10 +124,7 @@ export async function startDashboardServer(options: {
         origin,
         request,
         response,
-        scanWorkingDirectory: options.scanWorkingDirectory,
-        spawnProcess: options.spawnProcess,
         state,
-        workingDirectories,
       });
     } catch {
       sendJson(response, 500, {
@@ -220,30 +169,14 @@ async function routeRequest(options: {
   origin: string;
   request: IncomingMessage;
   response: ServerResponse;
-  scanWorkingDirectory:
-    | ((workingDirectory: string) => Promise<CoordinatedScan>)
-    | undefined;
-  spawnProcess: SpawnProcess | undefined;
   state: {
     actions: LocalActionService;
     currentScan: CoordinatedScan;
-    repositoryPath: string;
     scannedAt: string;
-    selectedWorkingDirectoryId: string;
+    workingDirectory: string;
   };
-  workingDirectories: WorkingDirectoryOption[];
 }): Promise<void> {
-  const {
-    credential,
-    editor,
-    origin,
-    request,
-    response,
-    scanWorkingDirectory,
-    spawnProcess,
-    state,
-    workingDirectories,
-  } = options;
+  const { credential, editor, origin, request, response, state } = options;
   const requestUrl = new URL(request.url ?? "/", origin);
   setSecurityHeaders(response);
 
@@ -288,7 +221,7 @@ async function routeRequest(options: {
     if (requestUrl.search !== "") {
       sendJson(response, 400, {
         error: "invalid_request",
-        message: "Working directory changes require a protected action request.",
+        message: "The scan endpoint accepts no query parameters.",
       });
       return;
     }
@@ -308,71 +241,8 @@ async function routeRequest(options: {
     return;
   }
 
-  if (
-    request.method === "POST" &&
-    requestUrl.pathname === "/api/actions/select-working-directory"
-  ) {
-    const body = await readJsonBody(request);
-    if (!isWorkingDirectoryActionBody(body)) {
-      sendJson(response, 400, {
-        error: "invalid_request",
-        message: "The action accepts one opaque working directory ID.",
-      });
-      return;
-    }
-    const selected = workingDirectories.find(
-      (entry) => entry.id === body.workingDirectoryId,
-    );
-    if (!selected || !scanWorkingDirectory) {
-      sendJson(response, 400, {
-        error: "invalid_working_directory",
-        message: "Select a working directory from the current dashboard session.",
-      });
-      return;
-    }
-    if (!(await isCurrentWorkingDirectory(selected, state.repositoryPath))) {
-      sendJson(response, 409, {
-        error: "working_directory_changed",
-        message:
-          "The selected working directory changed after startup. Relaunch Agent Config Doctor.",
-      });
-      return;
-    }
-    try {
-      const nextScan = await scanWorkingDirectory(selected.canonicalPath);
-      const nextActions = await createLocalActions(
-        nextScan,
-        "127.0.0.1",
-        editor,
-        spawnProcess,
-      );
-      state.currentScan = nextScan;
-      state.actions = nextActions;
-      state.scannedAt = new Date().toISOString();
-      state.selectedWorkingDirectoryId = selected.id;
-      sendJson(response, 200, {
-        report: state.currentScan.report,
-        options: publicDashboardOptions(
-          state,
-          workingDirectories,
-          editor,
-        ),
-      });
-    } catch {
-      sendJson(response, 500, {
-        error: "scan_failed",
-        message: "The selected working directory could not be scanned.",
-      });
-    }
-    return;
-  }
-
   if (request.method === "GET" && requestUrl.pathname === "/api/options") {
-    sendJson(
-      response,
-      200,
-      publicDashboardOptions(state, workingDirectories, editor),
-    );
+    sendJson(response, 200, publicDashboardOptions(state, editor));
     return;
   }
 
@@ -422,22 +292,6 @@ async function routeRequest(options: {
   });
 }
 
-async function isCurrentWorkingDirectory(
-  selected: WorkingDirectoryOption,
-  repositoryPath: string,
-): Promise<boolean> {
-  try {
-    const currentPath = await realpath(selected.canonicalPath);
-    return (
-      currentPath === selected.canonicalPath &&
-      isWithin(repositoryPath, currentPath) &&
-      (await stat(currentPath)).isDirectory()
-    );
-  } catch {
-    return false;
-  }
-}
-
 function isAuthorized(request: IncomingMessage, credential: string): boolean {
   const value = request.headers.authorization;
   if (!value?.startsWith("Bearer ")) {
@@ -457,20 +311,6 @@ function isResourceActionBody(value: unknown): value is { resourceId: string } {
     Object.keys(record).length === 1 &&
     typeof record.resourceId === "string" &&
     /^[A-Za-z0-9_-]+$/.test(record.resourceId)
-  );
-}
-
-function isWorkingDirectoryActionBody(
-  value: unknown,
-): value is { workingDirectoryId: string } {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
-  }
-  const record = value as Record<string, unknown>;
-  return (
-    Object.keys(record).length === 1 &&
-    typeof record.workingDirectoryId === "string" &&
-    /^[A-Za-z0-9_-]+$/.test(record.workingDirectoryId)
   );
 }
 

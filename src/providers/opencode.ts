@@ -25,6 +25,7 @@ import {
   isRecord,
   parseSemanticVersion,
   parseSkillFrontmatter,
+  reachForDirectory,
   resourceId,
   runCommand,
   sanitizeUrl,
@@ -228,6 +229,7 @@ async function discoverInstructions(
   const resources: ResourceRecord[] = [];
   for (const candidate of paths) {
     const shownPath = displayPath(candidate, context);
+    const loadDirectory = path.dirname(candidate);
     resources.push({
       id: resourceId("opencode", "instruction", shownPath),
       kind: "instruction",
@@ -239,12 +241,15 @@ async function discoverInstructions(
       owner: { type: "self" },
       path: await canonicalPath(candidate),
       displayPath: shownPath,
+      reach: candidate.startsWith(userRoot)
+        ? "chain"
+        : reachForDirectory(loadDirectory, context),
       state: "inactive",
       precedence: {},
       evidenceType: "parsed",
       evidenceReceipt: `file:${shownPath}`,
       capabilities: ["inspect", "open"],
-      metadata: { loadDirectory: path.dirname(candidate) },
+      metadata: { loadDirectory },
       findings: [],
     });
   }
@@ -296,6 +301,7 @@ async function discoverSkills(
     origin: string;
     rank: number;
     eligible: boolean;
+    reach?: ResourceRecord["reach"];
   }> = [];
   const globalRoots = [
     {
@@ -338,6 +344,7 @@ async function discoverSkills(
       origin: source.origin,
       rank: source.baseRank + Math.max(depth, 0),
       eligible: depth >= 0,
+      reach: reachForDirectory(source.scopeDirectory, context),
     });
   }
 
@@ -362,6 +369,7 @@ async function discoverSkills(
         owner: { type: "self" },
         path: await canonicalPath(location.skillPath),
         displayPath: shownPath,
+        ...(location.reach ? { reach: location.reach } : {}),
         state: parsed.error
           ? "invalid"
           : location.eligible

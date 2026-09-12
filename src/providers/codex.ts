@@ -1,10 +1,7 @@
-import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { readdir, readFile, realpath, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 import { parse as parseToml } from "smol-toml";
-import { parse as parseYaml } from "yaml";
 
 import { SCHEMA_VERSION } from "../core/schema.ts";
 import type {
@@ -16,8 +13,27 @@ import type {
 import type {
   EffectiveConfiguration,
   Finding,
+  JsonValue,
   ResourceRecord,
 } from "../core/schema.ts";
+import {
+  canonicalPath,
+  directoriesFromRoot,
+  displayPath,
+  findNamedFiles,
+  isDirectory,
+  isRecord,
+  isWithin,
+  parseSemanticVersion,
+  parseSkillFrontmatter,
+  reachForDirectory,
+  readJsonFile,
+  resourceId,
+  runCommand,
+  runJsonCommand,
+  sanitizeUrl,
+  stringValue,
+} from "./shared.ts";
 
 export class CodexAdapter implements ProviderAdapter {
   readonly provider = "codex" as const;
@@ -27,17 +43,10 @@ export class CodexAdapter implements ProviderAdapter {
   };
 
   async detect(context: ScanContext): Promise<ProviderDetection> {
-    const codexHome = path.resolve(
-      context.environment.CODEX_HOME ??
-        path.join(context.homeDirectory, ".codex"),
-    );
+    const codexHome = codexHomeFor(context);
     const executablePath = context.executables?.codex ?? "codex";
-    const result = spawnSync(executablePath, ["--version"], {
-      encoding: "utf8",
-      env: { ...process.env, ...context.environment },
-      timeout: 2_000,
-    });
-    const version = parseVersion(result.stdout);
+    const result = runCommand(executablePath, ["--version"], context, 2_000);
+    const version = parseSemanticVersion(result.stdout);
     const installed = result.status === 0;
     const configRoots = [codexHome];
     const projectConfigRoot = path.join(context.repositoryPath, ".codex");
@@ -67,7 +76,7 @@ export class CodexAdapter implements ProviderAdapter {
     if (detection.support !== "supported") {
       return [];
     }
-    const codexHome = detection.configRoots[0] ?? path.join(context.homeDirectory, ".codex");
+    const codexHome = detection.configRoots[0] ?? codexHomeFor(context);
     const userConfigPath = path.join(codexHome, "config.toml");
     const projectConfigPath = path.join(context.repositoryPath, ".codex", "config.toml");
     const userConfig = await loadConfig(userConfigPath);
@@ -120,11 +129,7 @@ export class CodexAdapter implements ProviderAdapter {
       ...nativeMcpResources,
     ];
 
-    return resources.sort((left, right) =>
-      `${left.kind}:${left.displayPath ?? left.name}:${left.id}`.localeCompare(
-        `${right.kind}:${right.displayPath ?? right.name}:${right.id}`,
-      ),
-    );
+    return resources.sort(compareResources);
   }
 
   async resolveEffective(
@@ -132,10 +137,7 @@ export class CodexAdapter implements ProviderAdapter {
     resources: ResourceRecord[],
     detection: ProviderDetection,
   ): Promise<EffectiveConfiguration> {
-    const codexHome = path.resolve(
-      context.environment.CODEX_HOME ??
-        path.join(context.homeDirectory, ".codex"),
-    );
+    const codexHome = codexHomeFor(context);
     const fallbackNames = getFallbackNames(
       await loadConfig(path.join(codexHome, "config.toml")),
     );
@@ -243,10 +245,10 @@ export class CodexAdapter implements ProviderAdapter {
   }
 }
 
-function parseVersion(output: unknown): string {
-  return typeof output === "string"
-    ? output.match(/\b\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\b/)?.[0] ?? "unknown"
-    : "unknown";
+function codexHomeFor(context: ScanContext): string {
+  return path.resolve(
+    context.environment.CODEX_HOME ?? path.join(context.homeDirectory, ".codex"),
+  );
 }
 
 function isSupportedCodexVersion(version: string): boolean {
@@ -256,14 +258,6 @@ function isSupportedCodexVersion(version: string): boolean {
   }
   const minor = Number(match[1]);
   return minor >= 117 && minor <= 154;
-}
-
-async function isDirectory(candidate: string): Promise<boolean> {
-  try {
-    return (await stat(candidate)).isDirectory();
-  } catch {
-    return false;
-  }
 }
 
 async function loadConfig(configPath: string): Promise<Record<string, unknown>> {
@@ -306,27 +300,12 @@ async function existingFiles(
   return files;
 }
 
-async function findNamedFiles(
-  directory: string,
-  names: ReadonlySet<string>,
-): Promise<string[]> {
-  const files: string[] = [];
-  const entries = await readdir(directory, { withFileTypes: true });
-
-  for (const entry of entries) {
-    if (entry.name === ".git" || entry.name === "node_modules") {
-      continue;
-    }
-
-    const candidate = path.join(directory, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...(await findNamedFiles(candidate, names)));
-    } else if ((entry.isFile() || entry.isSymbolicLink()) && names.has(entry.name)) {
-      files.push(candidate);
-    }
-  }
-
-  return files;
+function displayKnownPath(
+  candidate: string,
+  context: ScanContext,
+  codexHome: string,
+): string {
+  return displayPath(candidate, context, [["$CODEX_HOME", codexHome]]);
 }
 
 async function createInstructionResource(
@@ -335,15 +314,14 @@ async function createInstructionResource(
   codexHome: string,
   providerVersion: string,
 ): Promise<ResourceRecord> {
-  const canonicalPath = await realpath(discoveredPath);
+  const canonical = await canonicalPath(discoveredPath);
   const contents = await readFile(discoveredPath);
   const inCodexHome = isWithin(codexHome, discoveredPath);
-  const displayPath = inCodexHome
-    ? displayRelative("$CODEX_HOME", codexHome, discoveredPath)
-    : displayRelative("$REPO", context.repositoryPath, discoveredPath);
+  const shownPath = displayKnownPath(discoveredPath, context, codexHome);
+  const discoveredDirectory = path.dirname(discoveredPath);
 
   return {
-    id: resourceId("instruction", displayPath),
+    id: resourceId("codex", "instruction", shownPath),
     kind: "instruction",
     provider: "codex",
     providerVersion,
@@ -351,16 +329,17 @@ async function createInstructionResource(
     scope: inCodexHome ? "user" : "project",
     origin: inCodexHome ? "codex-home" : "repository",
     owner: { type: "self" },
-    path: canonicalPath,
-    displayPath,
+    path: canonical,
+    displayPath: shownPath,
+    reach: inCodexHome ? "chain" : reachForDirectory(discoveredDirectory, context),
     state: "inactive",
     precedence: {},
     evidenceType: "parsed",
-    evidenceReceipt: `file:${displayPath}`,
+    evidenceReceipt: `file:${shownPath}`,
     capabilities: ["inspect", "open"],
     metadata: {
       byteLength: contents.byteLength,
-      discoveredDirectory: path.dirname(discoveredPath),
+      discoveredDirectory,
       discoveredPath,
       empty: contents.toString("utf8").trim().length === 0,
     },
@@ -375,34 +354,51 @@ async function discoverStandaloneSkills(
 ): Promise<ResourceRecord[]> {
   const skillLocations: Array<{
     skillPath: string;
-    scope: "user" | "project" | "managed";
+    scope: CreateSkillResourceOptions["scope"];
     origin: string;
+    owner: ResourceRecord["owner"];
+    reach: ResourceRecord["reach"];
     active: boolean;
   }> = [];
   const userSkillRoot = path.join(context.homeDirectory, ".agents", "skills");
   const compatibilitySkillRoot = path.join(codexHome, "skills");
+  const systemSkillRoot = path.join(compatibilitySkillRoot, ".system");
 
-  for (const skillPath of await findSkillFiles(userSkillRoot)) {
+  for (const skillPath of await skillFilesInRoot(userSkillRoot)) {
     skillLocations.push({
       skillPath,
       scope: "user",
       origin: "agents-user",
+      owner: { type: "self" },
+      reach: "chain",
       active: true,
     });
   }
 
-  for (const skillPath of await findSkillFiles(compatibilitySkillRoot)) {
+  for (const skillPath of await skillFilesInRoot(compatibilitySkillRoot)) {
     skillLocations.push({
       skillPath,
       scope: "user",
       origin: "codex-home-compatibility",
+      owner: { type: "self" },
+      reach: "chain",
       active: true,
     });
   }
 
-  const chainDirectories = new Set(
-    directoriesFromRoot(context.repositoryPath, context.workingDirectory),
-  );
+  // Codex installs its own skills under skills/.system. They are runtime copies
+  // that Codex controls, so they are provider-owned rather than user errors.
+  for (const skillPath of await skillFilesInRoot(systemSkillRoot)) {
+    skillLocations.push({
+      skillPath,
+      scope: "bundled",
+      origin: "codex-system",
+      owner: { type: "provider", id: "codex" },
+      reach: "chain",
+      active: true,
+    });
+  }
+
   for (const skillPath of await findNamedFiles(
     context.repositoryPath,
     new Set(["SKILL.md"]),
@@ -411,26 +407,31 @@ async function discoverStandaloneSkills(
     if (!scopeDirectory) {
       continue;
     }
+    const reach = reachForDirectory(scopeDirectory, context);
     skillLocations.push({
       skillPath,
       scope: "project",
       origin: "agents-repository",
-      active: chainDirectories.has(scopeDirectory),
+      owner: { type: "self" },
+      reach,
+      active: reach === "chain",
     });
   }
 
   const adminRoot = context.adminRoots?.codex ?? "/etc/codex";
-  for (const skillPath of await findSkillFiles(path.join(adminRoot, "skills"))) {
+  for (const skillPath of await skillFilesInRoot(path.join(adminRoot, "skills"))) {
     skillLocations.push({
       skillPath,
       scope: "managed",
       origin: "codex-admin",
+      owner: { type: "administrator" },
+      reach: "chain",
       active: true,
     });
   }
 
   const skills = await Promise.all(
-    skillLocations.map(({ skillPath, scope, origin, active }) =>
+    skillLocations.map(({ skillPath, scope, origin, owner, reach, active }) =>
       createSkillResource({
         skillPath,
         context,
@@ -438,7 +439,8 @@ async function discoverStandaloneSkills(
         providerVersion,
         scope,
         origin,
-        owner: { type: "self" },
+        owner,
+        reach,
         state: active ? "active" : "inactive",
       }),
     ),
@@ -448,7 +450,11 @@ async function discoverStandaloneSkills(
   return skills;
 }
 
-async function findSkillFiles(root: string): Promise<string[]> {
+/**
+ * Codex skill roots hold one directory per skill. Symlinked skill directories
+ * are followed here because Codex follows them too.
+ */
+async function skillFilesInRoot(root: string): Promise<string[]> {
   try {
     const entries = await readdir(root, { withFileTypes: true });
     const skillFiles: string[] = [];
@@ -494,6 +500,7 @@ interface CreateSkillResourceOptions {
   scope: "user" | "project" | "managed" | "bundled";
   origin: string;
   owner: ResourceRecord["owner"];
+  reach: ResourceRecord["reach"];
   state: ResourceRecord["state"];
 }
 
@@ -505,14 +512,15 @@ async function createSkillResource({
   scope,
   origin,
   owner,
+  reach,
   state,
 }: CreateSkillResourceOptions): Promise<ResourceRecord> {
-  const canonicalPath = await realpath(skillPath);
+  const canonical = await canonicalPath(skillPath);
   const contents = await readFile(skillPath, "utf8");
   const directoryName = path.basename(path.dirname(skillPath));
   const frontmatter = parseSkillFrontmatter(contents);
-  const displayPath = displayKnownPath(skillPath, context, codexHome);
-  const id = resourceId("skill", displayPath);
+  const shownPath = displayKnownPath(skillPath, context, codexHome);
+  const id = resourceId("codex", "skill", shownPath);
   const findings: Finding[] = [];
 
   if (frontmatter.error) {
@@ -544,48 +552,21 @@ async function createSkillResource({
     scope,
     origin,
     owner,
-    path: canonicalPath,
-    displayPath,
+    path: canonical,
+    displayPath: shownPath,
+    ...(reach ? { reach } : {}),
     state: invalid ? "invalid" : state,
     precedence: {},
     evidenceType: "parsed",
-    evidenceReceipt: `file:${displayPath}`,
+    evidenceReceipt: `file:${shownPath}`,
     capabilities: ["inspect", "open"],
     metadata: {
-      canonicalTarget: canonicalPath,
+      canonicalTarget: canonical,
       description: frontmatter.description ?? "",
       directoryName,
     },
     findings,
   };
-}
-
-function parseSkillFrontmatter(contents: string): {
-  name?: string;
-  description?: string;
-  error?: string;
-} {
-  const match = contents.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
-  if (!match?.[1]) {
-    return { error: "SKILL.md must begin with YAML frontmatter." };
-  }
-
-  try {
-    const parsed = parseYaml(match[1]);
-    if (!isRecord(parsed)) {
-      return { error: "SKILL.md frontmatter must be a YAML object." };
-    }
-    const name = typeof parsed.name === "string" ? parsed.name.trim() : "";
-    const description =
-      typeof parsed.description === "string" ? parsed.description.trim() : "";
-
-    if (!name || !description) {
-      return { error: "SKILL.md frontmatter requires name and description." };
-    }
-    return { name, description };
-  } catch {
-    return { error: "SKILL.md frontmatter is not valid YAML." };
-  }
 }
 
 function markCanonicalDuplicates(skills: ResourceRecord[]): void {
@@ -628,7 +609,7 @@ async function discoverPlugins(
   detection: ProviderDetection,
   codexHome: string,
 ): Promise<ResourceRecord[]> {
-  const payload = runCodexJson(
+  const payload = runJsonCommand(
     detection.executablePath,
     ["-C", context.workingDirectory, "plugin", "list", "--json"],
     context,
@@ -651,16 +632,16 @@ async function discoverPlugins(
     const source = isRecord(rawPlugin.source) ? rawPlugin.source : {};
     const rawPluginPath = stringValue(source.path);
     const pluginPath = rawPluginPath
-      ? await realpathIfAvailable(rawPluginPath)
+      ? await canonicalPath(rawPluginPath)
       : undefined;
-    const displayPath = rawPluginPath
+    const shownPath = rawPluginPath
       ? displayKnownPath(rawPluginPath, context, codexHome)
       : undefined;
     const enabled = rawPlugin.enabled !== false;
     const version = stringValue(rawPlugin.version) ?? "unknown";
     const marketplaceName = stringValue(rawPlugin.marketplaceName) ?? "unknown";
     const plugin: ResourceRecord = {
-      id: resourceId("plugin", pluginId),
+      id: resourceId("codex", "plugin", pluginId),
       kind: "plugin",
       provider: "codex",
       providerVersion: detection.version,
@@ -669,7 +650,7 @@ async function discoverPlugins(
       origin: `marketplace:${marketplaceName}`,
       owner: { type: "self" },
       ...(pluginPath ? { path: pluginPath } : {}),
-      ...(displayPath ? { displayPath } : {}),
+      ...(shownPath ? { displayPath: shownPath } : {}),
       state: enabled ? "active" : "disabled",
       precedence: {},
       evidenceType: "native",
@@ -715,14 +696,14 @@ async function discoverPluginChildren(
 ): Promise<ResourceRecord[]> {
   const resources: ResourceRecord[] = [];
   const manifestPath = path.join(pluginPath, ".codex-plugin", "plugin.json");
-  const manifest = await loadJsonFile(manifestPath);
+  const manifest = await readJsonFile(manifestPath);
   const skillRootValue = isRecord(manifest)
     ? stringValue(manifest.skills)
     : undefined;
 
   if (skillRootValue) {
     const skillRoot = path.resolve(pluginPath, skillRootValue);
-    for (const skillPath of await findSkillFiles(skillRoot)) {
+    for (const skillPath of await skillFilesInRoot(skillRoot)) {
       resources.push(
         await createSkillResource({
           skillPath,
@@ -732,6 +713,7 @@ async function discoverPluginChildren(
           scope: "bundled",
           origin: "plugin",
           owner: { type: "plugin", id: pluginId },
+          reach: "chain",
           state: plugin.state === "active" ? "active" : "disabled",
         }),
       );
@@ -739,7 +721,7 @@ async function discoverPluginChildren(
   }
 
   const mcpConfigPath = path.join(pluginPath, ".mcp.json");
-  const mcpConfig = await loadJsonFile(mcpConfigPath);
+  const mcpConfig = await readJsonFile(mcpConfigPath);
   const mcpServers = isRecord(mcpConfig) && isRecord(mcpConfig.mcpServers)
     ? mcpConfig.mcpServers
     : {};
@@ -747,9 +729,9 @@ async function discoverPluginChildren(
     if (!isRecord(rawServer)) {
       continue;
     }
-    const displayPath = displayKnownPath(mcpConfigPath, context, codexHome);
+    const shownPath = displayKnownPath(mcpConfigPath, context, codexHome);
     resources.push({
-      id: resourceId("mcp", `${pluginId}:${name}`),
+      id: resourceId("codex", "mcp", `${pluginId}:${name}`),
       kind: "mcp",
       provider: "codex",
       providerVersion,
@@ -757,12 +739,12 @@ async function discoverPluginChildren(
       scope: "bundled",
       origin: "plugin",
       owner: { type: "plugin", id: pluginId },
-      path: await realpathIfAvailable(mcpConfigPath),
-      displayPath,
+      path: await canonicalPath(mcpConfigPath),
+      displayPath: shownPath,
       state: plugin.state === "active" ? "active" : "disabled",
       precedence: {},
       evidenceType: "parsed",
-      evidenceReceipt: `file:${displayPath}`,
+      evidenceReceipt: `file:${shownPath}`,
       capabilities: ["inspect"],
       metadata: sanitizeMcpTransport(rawServer),
       findings: [],
@@ -782,7 +764,7 @@ async function discoverNativeMcpServers(
   userConfigPath: string,
   projectConfigPath: string,
 ): Promise<ResourceRecord[]> {
-  const payload = runCodexJson(
+  const payload = runJsonCommand(
     detection.executablePath,
     ["-C", context.workingDirectory, "mcp", "list", "--json"],
     context,
@@ -829,10 +811,10 @@ async function discoverNativeMcpServers(
     }
 
     const sourcePath = projectScoped ? projectConfigPath : userConfigPath;
-    const displayPath = displayKnownPath(sourcePath, context, codexHome);
+    const shownPath = displayKnownPath(sourcePath, context, codexHome);
 
     resources.push({
-      id: resourceId("mcp", `standalone:${name}`),
+      id: resourceId("codex", "mcp", `standalone:${name}`),
       kind: "mcp",
       provider: "codex",
       providerVersion: detection.version,
@@ -840,8 +822,8 @@ async function discoverNativeMcpServers(
       scope: projectScoped ? "project" : "user",
       origin: "codex-config",
       owner: { type: "self" },
-      path: await realpathIfAvailable(sourcePath),
-      displayPath,
+      path: await canonicalPath(sourcePath),
+      displayPath: shownPath,
       state: rawServer.enabled === false ? "disabled" : "active",
       precedence: {},
       evidenceType: "native",
@@ -861,35 +843,10 @@ async function discoverNativeMcpServers(
   return resources;
 }
 
-function runCodexJson(
-  executablePath: string | undefined,
-  args: string[],
-  context: ScanContext,
-): unknown {
-  if (!executablePath) {
-    return undefined;
-  }
-  const result = spawnSync(executablePath, args, {
-    cwd: context.workingDirectory,
-    encoding: "utf8",
-    env: { ...process.env, ...context.environment },
-    timeout: 5_000,
-    maxBuffer: 10 * 1024 * 1024,
-  });
-  if (result.status !== 0) {
-    return undefined;
-  }
-  try {
-    return JSON.parse(result.stdout);
-  } catch {
-    return undefined;
-  }
-}
-
-function sanitizeMcpTransport(transport: Record<string, unknown>): Record<string, import("../core/schema.ts").JsonValue> {
+function sanitizeMcpTransport(transport: Record<string, unknown>): Record<string, JsonValue> {
   const transportType = stringValue(transport.type) ??
     (typeof transport.command === "string" ? "stdio" : "streamable_http");
-  const metadata: Record<string, import("../core/schema.ts").JsonValue> = {
+  const metadata: Record<string, JsonValue> = {
     transportType,
   };
 
@@ -911,7 +868,7 @@ function sanitizeMcpTransport(transport: Record<string, unknown>): Record<string
   const environmentHeaders = isRecord(transport.env_http_headers)
     ? transport.env_http_headers
     : {};
-  metadata.url = redactUrl(stringValue(transport.url));
+  metadata.url = sanitizeUrl(stringValue(transport.url));
   metadata.staticHeaderNames = Object.keys(staticHeaders).sort();
   metadata.environmentHeaderNames = Object.keys(environmentHeaders).sort();
   metadata.hasHeaderHelper = typeof transport.http_headers_helper === "string";
@@ -921,106 +878,11 @@ function sanitizeMcpTransport(transport: Record<string, unknown>): Record<string
   return metadata;
 }
 
-function redactUrl(rawUrl: string | undefined): string {
-  if (!rawUrl) {
-    return "unknown";
-  }
-  try {
-    const url = new URL(rawUrl);
-    url.username = "";
-    url.password = "";
-    url.search = "";
-    url.hash = "";
-    return url.toString();
-  } catch {
-    return "redacted-invalid-url";
-  }
-}
-
 function configHasMcpServer(
   config: Record<string, unknown>,
   name: string,
 ): boolean {
   return isRecord(config.mcp_servers) && name in config.mcp_servers;
-}
-
-async function loadJsonFile(filePath: string): Promise<unknown> {
-  try {
-    return JSON.parse(await readFile(filePath, "utf8"));
-  } catch {
-    return undefined;
-  }
-}
-
-async function realpathIfAvailable(filePath: string): Promise<string> {
-  try {
-    return await realpath(filePath);
-  } catch {
-    return path.resolve(filePath);
-  }
-}
-
-function displayKnownPath(
-  candidate: string,
-  context: ScanContext,
-  codexHome: string,
-): string {
-  if (isWithin(codexHome, candidate)) {
-    return displayRelative("$CODEX_HOME", codexHome, candidate);
-  }
-  if (isWithin(context.repositoryPath, candidate)) {
-    return displayRelative("$REPO", context.repositoryPath, candidate);
-  }
-  if (isWithin(context.homeDirectory, candidate)) {
-    return displayRelative("$HOME", context.homeDirectory, candidate);
-  }
-  return `<external>/${path.basename(candidate)}`;
-}
-
-function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function resourceId(kind: ResourceRecord["kind"], identity: string): string {
-  return createHash("sha256")
-    .update(`codex\0${kind}\0${identity}`)
-    .digest("hex")
-    .slice(0, 20);
-}
-
-function displayRelative(label: string, root: string, candidate: string): string {
-  const relativePath = path.relative(root, candidate).split(path.sep).join("/");
-  return relativePath ? `${label}/${relativePath}` : label;
-}
-
-function isWithin(root: string, candidate: string): boolean {
-  const relativePath = path.relative(path.resolve(root), path.resolve(candidate));
-  return (
-    relativePath === "" ||
-    (relativePath !== ".." && !relativePath.startsWith(`..${path.sep}`))
-  );
-}
-
-function directoriesFromRoot(root: string, workingDirectory: string): string[] {
-  const resolvedRoot = path.resolve(root);
-  const resolvedWorkingDirectory = path.resolve(workingDirectory);
-
-  if (!isWithin(resolvedRoot, resolvedWorkingDirectory)) {
-    return [];
-  }
-
-  const relativeDirectory = path.relative(resolvedRoot, resolvedWorkingDirectory);
-  const segments = relativeDirectory ? relativeDirectory.split(path.sep) : [];
-  return [
-    resolvedRoot,
-    ...segments.map((_, index) =>
-      path.join(resolvedRoot, ...segments.slice(0, index + 1)),
-    ),
-  ];
 }
 
 function selectByName(
@@ -1061,4 +923,10 @@ function shadowSiblings(
     resource.state = "shadowed";
     resource.precedence = { shadowedBy: selected.id };
   }
+}
+
+function compareResources(left: ResourceRecord, right: ResourceRecord): number {
+  return `${left.kind}:${left.displayPath ?? left.name}:${left.id}`.localeCompare(
+    `${right.kind}:${right.displayPath ?? right.name}:${right.id}`,
+  );
 }

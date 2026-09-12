@@ -23,8 +23,10 @@ import {
   isDirectory,
   isFile,
   isRecord,
+  isWithin,
   parseSemanticVersion,
   parseSkillFrontmatter,
+  reachForDirectory,
   resourceId,
   runCommand,
   runJsonCommand,
@@ -225,9 +227,9 @@ async function parseInstructions(
     const shownPath = displayPath(candidate, context);
     const compatibilityStatus = stringValue(raw?.compatibilityStatus);
     const vendor = stringValue(raw?.vendor);
-    const scope: ResourceScope = candidate.startsWith(context.homeDirectory)
-      ? "user"
-      : "project";
+    const scope: ResourceScope = isWithin(context.repositoryPath, candidate)
+      ? "project"
+      : "user";
     const active = native !== undefined && compatibilityStatus !== "disabled";
     const id = resourceId("grok", "instruction", shownPath);
     resources.push({
@@ -241,6 +243,10 @@ async function parseInstructions(
       owner: { type: "self" },
       path: await canonicalPath(candidate),
       displayPath: shownPath,
+      reach:
+        native || scope === "user"
+          ? "chain"
+          : reachForDirectory(path.dirname(candidate), context),
       state: active ? "active" : "inactive",
       precedence: native ? { nativeOrder: native.order } : {},
       evidenceType: native ? "native" : "parsed",
@@ -418,7 +424,7 @@ async function parseSkills(
           provider: "grok",
           providerVersion,
           name,
-          scope: skillPath.startsWith(context.homeDirectory) ? "user" : "project",
+          scope: isWithin(context.repositoryPath, skillPath) ? "project" : "user",
           origin: compatible ? "compatibility" : "grok-native-path",
           owner: { type: "self" },
           path: await canonicalPath(skillPath),
