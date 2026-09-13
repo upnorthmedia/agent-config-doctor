@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import {
   mkdir,
   mkdtemp,
+  readFile,
   rm,
   symlink,
   unlink,
@@ -125,8 +126,12 @@ test("protects local data with a per-process credential and restrictive headers"
   const optionBody = await optionResponse.text();
   assert.equal(optionBody.includes(fixtureRoot), false);
   assert.equal(optionBody.includes("executablePath"), false);
-  const publicOptions = JSON.parse(optionBody) as { scannedAt: string };
+  const publicOptions = JSON.parse(optionBody) as { scannedAt: string; version: string };
   assert.equal(Number.isNaN(Date.parse(publicOptions.scannedAt)), false);
+  const metadata = JSON.parse(
+    await readFile(new URL("../package.json", import.meta.url), "utf8"),
+  ) as { version: string };
+  assert.equal(publicOptions.version, metadata.version);
 });
 
 test("scans only the launch directory and never infers switchable working directories", async (t) => {

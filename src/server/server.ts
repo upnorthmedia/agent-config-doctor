@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 
 import type { CoordinatedScan } from "../core/coordinator.ts";
+import { packageVersion } from "../core/version.ts";
 import {
   dashboardClientScript,
   dashboardDocument,
@@ -85,6 +86,7 @@ function publicDashboardOptions(
   editor: DetectedEditor | undefined,
 ) {
   return {
+    version: packageVersion(),
     workingDirectory: state.workingDirectory,
     scannedAt: state.scannedAt,
     actionableResourceIds: state.actions.resourceIds(),

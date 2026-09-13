@@ -37,6 +37,7 @@ export function dashboardDocument(): string {
       <div class="nav-note">
         <span class="nav-note-label">Local session</span>
         <span>Read-only, loopback protected</span>
+        <span class="nav-version">Agent Config Doctor <span id="app-version"></span></span>
       </div>
     </aside>
 
@@ -258,6 +259,7 @@ code { font-family: var(--mono); font-size: 0.93em; }
 .nav-item.is-active { color: var(--text); background: var(--panel-2); border-color: var(--border); }
 .nav-note { margin-top: auto; padding: 12px 10px 4px; display: grid; gap: 3px; color: var(--quiet); font-size: 11px; border-top: 1px solid var(--border); }
 .nav-note-label { color: var(--muted); font-weight: 650; }
+.nav-version { margin-top: 4px; font-variant-numeric: tabular-nums; }
 
 .workspace { grid-area: workspace; min-width: 0; padding: 30px clamp(20px, 4vw, 54px) 56px; }
 .view { width: min(1180px, 100%); margin: 0 auto; }
@@ -1181,8 +1183,13 @@ export const dashboardClientScript = String.raw`
     const providerSelect = byId("effective-provider");
     const previousProvider = providerSelect.value;
     fillSelect(providerSelect, state.report.providers.map((provider) => ({ value: provider.provider, label: providerLabel(provider.provider) })), null);
+    // Default to the first supported provider so the page opens on a harness
+    // that actually resolved something, not on whichever adapter sorts first.
+    const firstSupported = state.report.providers.find((provider) => provider.support === "supported");
     if (previousProvider && state.report.effective[previousProvider]) providerSelect.value = previousProvider;
+    else if (firstSupported) providerSelect.value = firstSupported.provider;
     byId("working-directory").textContent = state.options.workingDirectory;
+    byId("app-version").textContent = state.options.version ? "v" + state.options.version : "";
   }
 
   function renderAll() {

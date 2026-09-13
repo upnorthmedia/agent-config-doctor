@@ -43,6 +43,7 @@ const expectedPackedFiles = [
   "dist/core/runtime.js",
   "dist/core/scanner.js",
   "dist/core/schema.js",
+  "dist/core/version.js",
   "dist/dashboard/dashboard.js",
   "dist/providers/claude.js",
   "dist/providers/codex.js",
@@ -86,7 +87,7 @@ test("declares the approved public v1 package contract", async () => {
   ) as PackageMetadata;
 
   assert.equal(metadata.name, "agent-config-doctor");
-  assert.equal(metadata.version, "1.0.1");
+  assert.equal(metadata.version, "1.1.0");
   assert.equal(metadata.private, undefined);
   assert.equal(metadata.license, "MIT");
   assert.deepEqual(metadata.engines, { node: ">=24" });
@@ -171,7 +172,7 @@ test(
     const installedMetadata = JSON.parse(
       await readFile(path.join(installedPackageRoot, "package.json"), "utf8"),
     ) as PackageMetadata;
-    assert.equal(installedMetadata.version, "1.0.1");
+    assert.equal(installedMetadata.version, "1.1.0");
     await access(path.join(installRoot, "node_modules", "smol-toml", "package.json"));
     await access(path.join(installRoot, "node_modules", "yaml", "package.json"));
     await assert.rejects(
@@ -195,6 +196,8 @@ test(
     const help = run(binaryPath, ["--help"], installRoot, environment);
     assert.match(help, /^Agent Config Doctor\n/);
     assert.match(help, /agent-config-doctor scan \[path\] --json/);
+    const version = run(binaryPath, ["--version"], installRoot, environment);
+    assert.equal(version, `${installedMetadata.version}\n`);
 
     const scanOutput = run(
       binaryPath,

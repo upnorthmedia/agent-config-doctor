@@ -7,6 +7,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - Native provider commands go through `runNativeJson` in `src/providers/shared.ts`. A failure becomes a scan notice, never an empty successful result. Fixture executables that stall, fail, or return bad JSON live in `test/fixtures/codex/instruction-chain/bin`.
 - The Codex golden fixture `test/fixtures/codex/instruction-chain/expected-scan.json` is a data contract: regenerate it deliberately and review the diff, never accept it wholesale.
 - OpenCode is parse-only on purpose. `opencode debug config` prints provider API keys and `opencode debug skill` prints full skill bodies, and both write to the OpenCode database (spike on 1.18.30, see the commit that added `src/providers/opencode-v1.ts`). Only 1.18.x is supported; `src/providers/opencode-v2.ts` documents 2.x rules that are not verified against a released binary.
+- The dashboard is one HTML document served on the allowlisted routes in `isPageRoute` (`src/server/server.ts`); the client reads the path. Findings get their operator wording from the rule catalog in `src/core/rules.ts`: add an entry there for every new finding code, or it falls back to the raw message and is never actionable.
+- Previews (`src/server/preview.ts`) are limited to file-backed instruction and skill documents and reuse the action inventory's revalidation. Keep configuration files out of raw previews; they show structured redacted metadata instead.
 - Fixture executables are Node scripts. Do not put a dot in their file names; Node refuses to load `bin/opencode-1.17` as a module.
 - Do not push, tag, or publish from a task branch. Releases are explicit actions outside normal work.
 

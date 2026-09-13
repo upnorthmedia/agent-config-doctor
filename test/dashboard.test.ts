@@ -62,6 +62,8 @@ test("dashboard document answers one operator question per page and keeps the de
   assert.match(document, /id="reveal-resource"/);
   assert.match(document, /id="open-resource"/);
   assert.match(document, /class="brand"[^>]+data-view="overview"/);
+  assert.match(document, /id="app-version"/);
+  assert.match(dashboardClientScript, /options\.version/);
   assert.equal(document.includes("credential="), false);
 });
 
@@ -105,6 +107,8 @@ test("dashboard client translates the data model into operator labels and groups
   assert.match(dashboardClientScript, /finding\.impact/);
   assert.match(dashboardClientScript, /finding\.remediation/);
   assert.match(dashboardClientScript, /finding\.actionable/);
+  // Effective opens on a provider that resolved something, not the first adapter.
+  assert.match(dashboardClientScript, /find\(\(provider\) => provider\.support === "supported"\)/);
 });
 
 test("dashboard navigates with real routes and restores them from history", () => {
