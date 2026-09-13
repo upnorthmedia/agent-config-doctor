@@ -19,7 +19,7 @@ export function dashboardDocument(): string {
   -->
   <div class="app-shell">
     <header class="app-header">
-      <a class="brand" href="#overview" data-view="overview" aria-label="Agent Config Doctor overview"><span>Agent Config</span> Doctor</a>
+      <a class="brand" href="/" data-view="overview" aria-label="Agent Config Doctor overview"><span>Agent Config</span> Doctor</a>
       <div class="scan-context">
         <span class="scan-dot" aria-hidden="true"></span>
         <span id="header-context">Reading local configuration</span>
@@ -28,11 +28,11 @@ export function dashboardDocument(): string {
 
     <aside class="side-nav" aria-label="Dashboard views">
       <nav>
-        <a class="nav-item is-active" href="#overview" data-view="overview">Overview</a>
-        <a class="nav-item" href="#installed" data-view="installed">Installed</a>
-        <a class="nav-item" href="#effective" data-view="effective">Effective</a>
-        <a class="nav-item" href="#findings" data-view="findings">Findings</a>
-        <a class="nav-item" href="#detail" data-view="detail" id="detail-nav" hidden>Resource detail</a>
+        <a class="nav-item is-active" href="/" data-view="overview">Overview</a>
+        <a class="nav-item" href="/installed" data-view="installed">Installed</a>
+        <a class="nav-item" href="/effective" data-view="effective">Effective</a>
+        <a class="nav-item" href="/findings" data-view="findings">Findings</a>
+        <a class="nav-item" href="/" data-view="detail" id="detail-nav" hidden>Resource detail</a>
       </nav>
       <div class="nav-note">
         <span class="nav-note-label">Local session</span>
@@ -59,7 +59,7 @@ export function dashboardDocument(): string {
         </div>
         <div class="provider-summaries" id="overview-providers" aria-label="Provider summaries"></div>
         <section class="section-block" aria-labelledby="priority-heading">
-          <div class="section-heading"><h2 id="priority-heading">Fix first</h2><a class="text-button" href="#findings" data-view="findings">View all findings</a></div>
+          <div class="section-heading"><h2 id="priority-heading">Fix first</h2><a class="text-button" href="/findings" data-view="findings">View all findings</a></div>
           <div class="finding-list" id="priority-findings"></div>
         </section>
       </section>
@@ -137,13 +137,19 @@ export function dashboardDocument(): string {
             <button class="primary-button" type="button" id="open-resource">Open in editor</button>
           </div>
         </div>
-        <div class="detail-empty" id="detail-empty"><p>No resource selected yet.</p><a class="button-link" href="#installed" data-view="installed">Browse installed configuration</a></div>
+        <div class="detail-empty" id="detail-empty"><p>No resource selected yet.</p><a class="button-link" href="/installed" data-view="installed">Browse installed configuration</a></div>
         <div class="detail-layout" id="detail-content" hidden>
+          <section class="detail-section detail-content-preview" id="detail-content-preview">
+            <div class="section-heading"><h2>Content</h2><span id="preview-meta"></span></div>
+            <p class="preview-warning">Shown exactly as written on disk inside this local session. File content may contain sensitive material such as internal names, hostnames, or credentials. Review it before sharing a screenshot. Exported JSON stays redacted.</p>
+            <p class="preview-status" id="preview-status" hidden></p>
+            <div class="preview-lines" id="preview-lines" role="region" aria-label="File content"></div>
+          </section>
           <section class="detail-section detail-status"><h2>Effective status</h2><div id="detail-effective"></div></section>
           <section class="detail-section detail-validation"><h2>Validation</h2><div class="finding-list" id="detail-validation"></div></section>
           <section class="detail-section detail-metadata"><h2>Metadata</h2><dl id="detail-metadata"></dl></section>
           <section class="detail-section detail-provider">
-            <details id="detail-provider-data"><summary>Redacted provider data</summary><pre id="detail-preview"></pre></details>
+            <details id="detail-provider-data"><summary>Redacted provider data</summary><pre id="detail-provider-json"></pre></details>
           </section>
           <section class="detail-section detail-raw-section">
             <details id="detail-raw"><summary>Raw JSON</summary><pre id="detail-raw-json"></pre></details>
@@ -364,7 +370,16 @@ button:hover:not(:disabled), .button-link:hover { border-color: var(--accent); }
 .detail-section dl > div { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 12px; padding: 8px 3px; border-bottom: 1px solid var(--border); }
 .detail-section dt { color: var(--muted); }
 .detail-section dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
-.detail-validation { grid-column: 1 / -1; }
+.detail-validation, .detail-content-preview { grid-column: 1 / -1; }
+.preview-warning { margin: 0 0 10px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); border-radius: 6px; background: color-mix(in srgb, var(--warn) 6%, transparent); color: var(--muted); font-size: 12px; }
+.preview-status { margin: 0 0 10px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.preview-status.is-error { color: var(--error-text); }
+.preview-lines { max-height: 480px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--inset); font: 12px/1.55 var(--mono); tab-size: 2; }
+.preview-lines:empty { display: none; }
+.preview-line { display: grid; grid-template-columns: 3.5em minmax(0, 1fr); }
+.preview-number { padding: 0 8px; color: var(--quiet); text-align: right; user-select: none; }
+.preview-text { min-width: 0; padding-right: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.preview-line:hover { background: var(--panel); }
 .detail-provider, .detail-raw-section { grid-column: 1 / -1; }
 .detail-section details > summary { color: var(--muted); font-size: 13px; font-weight: 650; list-style: none; }
 .detail-section details > summary::-webkit-details-marker { display: none; }
@@ -429,13 +444,17 @@ export const dashboardClientScript = String.raw`
 (() => {
   "use strict";
   const byId = (id) => document.getElementById(id);
-  const views = ["overview", "installed", "effective", "findings"];
+  const routes = { overview: "/", installed: "/installed", effective: "/effective", findings: "/findings" };
+  const resourceRoute = "/resources/";
+  const credentialKey = "agent-config-doctor-credential";
+  const relaunchMessage = "This tab has no local session credential. Relaunch Agent Config Doctor and open the URL it prints.";
   const state = {
     report: null,
     options: null,
     selectedResourceId: null,
     view: "overview",
     openGroups: new Set(["My configuration", "Administrator configuration"]),
+    previewRequest: 0,
   };
   const actionEndpoints = {
     open: "/api/actions/open",
@@ -450,6 +469,7 @@ export const dashboardClientScript = String.raw`
   ];
   const severityOrder = { error: 0, warning: 1, info: 2 };
   let toastTimer;
+  let filterSyncTimer;
 
   function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -458,27 +478,43 @@ export const dashboardClientScript = String.raw`
     return node;
   }
 
+  // The credential arrives once in the URL fragment, moves into session
+  // storage for this tab, and is stripped from the address bar. It is never
+  // written to local storage or a cookie, so it dies with the tab.
   function credential() {
     const fragment = new URLSearchParams(location.hash.slice(1));
     const supplied = fragment.get("credential");
     if (supplied) {
-      sessionStorage.setItem("agent-config-doctor-credential", supplied);
+      sessionStorage.setItem(credentialKey, supplied);
       history.replaceState(null, "", location.pathname + location.search);
       return supplied;
     }
-    return sessionStorage.getItem("agent-config-doctor-credential");
+    return sessionStorage.getItem(credentialKey);
   }
 
-  const sessionCredential = credential();
+  let sessionCredential = credential();
+
+  class ApiError extends Error {
+    constructor(status, code, message) {
+      super(message);
+      this.status = status;
+      this.code = code;
+    }
+  }
 
   async function api(endpoint, options = {}) {
-    if (!sessionCredential) throw new Error("This dashboard URL is missing its local session credential. Relaunch Agent Config Doctor.");
+    if (!sessionCredential) throw new ApiError(401, "unauthorized", relaunchMessage);
     const headers = new Headers(options.headers || {});
     headers.set("Authorization", "Bearer " + sessionCredential);
     if (options.body) headers.set("Content-Type", "application/json");
     const response = await fetch(endpoint, { ...options, headers });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.message || "The local dashboard request failed.");
+    if (response.status === 401) {
+      sessionStorage.removeItem(credentialKey);
+      sessionCredential = null;
+      throw new ApiError(401, "unauthorized", relaunchMessage);
+    }
+    if (!response.ok) throw new ApiError(response.status, payload.error || "request_failed", payload.message || "The local dashboard request failed.");
     return payload;
   }
 
@@ -577,8 +613,66 @@ export const dashboardClientScript = String.raw`
       || left.code.localeCompare(right.code));
   }
 
-  function switchView(view) {
-    if (view === "detail" && !state.selectedResourceId) return;
+  // Routing. Every page is a real URL served by the local process: pushState
+  // moves between pages, popstate restores them, and only debounced filter
+  // changes rewrite the current entry.
+  function parseLocation() {
+    const pathname = location.pathname;
+    if (pathname.startsWith(resourceRoute)) {
+      return { view: "detail", resourceId: pathname.slice(resourceRoute.length) };
+    }
+    const view = Object.keys(routes).find((name) => routes[name] === pathname) || "overview";
+    return { view, resourceId: null };
+  }
+
+  function resourceLink(resource, className, text) {
+    const link = element("a", className, text);
+    link.href = resourceRoute + encodeURIComponent(resource.id);
+    link.addEventListener("click", (event) => {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+      event.preventDefault();
+      navigate(link.getAttribute("href"));
+    });
+    return link;
+  }
+
+  function navigate(path) {
+    if (location.pathname + location.search === path) {
+      applyLocation();
+      return;
+    }
+    history.pushState(null, "", path);
+    applyLocation();
+  }
+
+  function applyLocation() {
+    const target = parseLocation();
+    if (target.view === "detail") {
+      if (!resourceById(target.resourceId)) {
+        state.selectedResourceId = null;
+        byId("detail-nav").hidden = true;
+        byId("detail-empty").hidden = false;
+        byId("detail-content").hidden = true;
+        byId("resource-actions").hidden = true;
+        byId("detail-title").textContent = "Resource not in this scan";
+        byId("detail-subtitle").textContent = "The address names a resource that the current scan did not discover. Relaunch Agent Config Doctor if the file was added after the scan.";
+        showView("detail");
+        return;
+      }
+      state.selectedResourceId = target.resourceId;
+      byId("detail-nav").hidden = false;
+      byId("detail-nav").href = resourceRoute + encodeURIComponent(target.resourceId);
+      renderDetail();
+      renderInventory();
+      showView("detail");
+      return;
+    }
+    if (target.view === "installed") readFiltersFromLocation();
+    if (target.view === "effective") readEffectiveProviderFromLocation();
+    showView(target.view);
+  }
+
+  function showView(view) {
     state.view = view;
     document.querySelectorAll("[data-view-panel]").forEach((panel) => {
       panel.hidden = panel.dataset.viewPanel !== view;
@@ -586,8 +680,50 @@ export const dashboardClientScript = String.raw`
     document.querySelectorAll(".nav-item[data-view]").forEach((item) => {
       item.classList.toggle("is-active", item.dataset.view === view);
     });
-    history.replaceState(null, "", "#" + view);
     window.scrollTo(0, 0);
+  }
+
+  const filterFields = [["q", "inventory-search"], ["provider", "provider-filter"], ["kind", "kind-filter"], ["state", "state-filter"]];
+
+  function readFiltersFromLocation() {
+    const params = new URLSearchParams(location.search);
+    for (const [key, id] of filterFields) {
+      const field = byId(id);
+      const value = params.get(key);
+      if (field.tagName === "SELECT") {
+        field.value = value && Array.from(field.options).some((option) => option.value === value) ? value : "all";
+      } else {
+        field.value = value || "";
+      }
+    }
+    renderInventory();
+  }
+
+  function readEffectiveProviderFromLocation() {
+    const provider = new URLSearchParams(location.search).get("provider");
+    const select = byId("effective-provider");
+    if (provider && Array.from(select.options).some((option) => option.value === provider)) select.value = provider;
+    renderEffective();
+  }
+
+  function scheduleFilterSync() {
+    clearTimeout(filterSyncTimer);
+    filterSyncTimer = setTimeout(() => {
+      const params = new URLSearchParams();
+      if (state.view === "installed") {
+        for (const [key, id] of filterFields) {
+          const value = byId(id).value.trim();
+          if (value && value !== "all") params.set(key, value);
+        }
+      } else if (state.view === "effective") {
+        params.set("provider", byId("effective-provider").value);
+      } else {
+        return;
+      }
+      const search = params.toString();
+      const next = routes[state.view] + (search ? "?" + search : "");
+      if (location.pathname + location.search !== next) history.replaceState(null, "", next);
+    }, 250);
   }
 
   function renderNotices() {
@@ -659,12 +795,10 @@ export const dashboardClientScript = String.raw`
           card.append(element("p", "provider-note is-warning", "Scan incomplete: " + notice.command + " did not finish. See the notice above for how to rerun it."));
         }
         const link = element("a", "text-button", "View effective configuration");
-        link.href = "#effective";
+        link.href = routes.effective + "?provider=" + encodeURIComponent(provider.provider);
         link.addEventListener("click", (event) => {
           event.preventDefault();
-          byId("effective-provider").value = provider.provider;
-          renderEffective();
-          switchView("effective");
+          navigate(link.getAttribute("href"));
         });
         card.append(link);
       } else {
@@ -751,8 +885,7 @@ export const dashboardClientScript = String.raw`
   }
 
   function resourceRow(resource) {
-    const row = element("button", "resource-row" + (resource.id === state.selectedResourceId ? " is-selected" : ""));
-    row.type = "button";
+    const row = resourceLink(resource, "resource-row" + (resource.id === state.selectedResourceId ? " is-selected" : ""));
     row.append(
       element("span", "resource-name", resource.name),
       element("span", "resource-provider", providerLabel(resource.provider)),
@@ -760,18 +893,14 @@ export const dashboardClientScript = String.raw`
       element("span", "resource-path", resource.displayPath || "No file path"),
       statusBadge(operatorStatus(resource, decisionFor(resource))),
     );
-    row.addEventListener("click", () => selectResource(resource.id));
     return row;
   }
 
   function effectiveRow(resource, decision, order) {
     const row = element("div", "effective-row");
     row.append(element("span", "effective-order", order === undefined ? "" : String(order)));
-    const name = element("button", "effective-name", resource.name);
-    name.type = "button";
-    name.addEventListener("click", () => selectResource(resource.id));
     const reason = decision ? decision.reason : "Found outside the selected directory's ancestor chain.";
-    row.append(name, statusBadge(operatorStatus(resource, decision)), element("span", "effective-reason", reason));
+    row.append(resourceLink(resource, "effective-name", resource.name), statusBadge(operatorStatus(resource, decision)), element("span", "effective-reason", reason));
     return row;
   }
 
@@ -861,10 +990,9 @@ export const dashboardClientScript = String.raw`
     const facts = element("dl", "finding-facts");
     facts.append(factRow("Impact", finding.impact || "Not classified."));
     facts.append(factRow("Owner", findingOwnerLabel(finding, resource)));
-    const source = element("button", "finding-source", resource ? (resource.displayPath || resource.name) : providerLabel(finding.provider) + " (no single file)");
-    source.type = "button";
-    source.disabled = !resource;
-    if (resource) source.addEventListener("click", () => selectResource(resource.id));
+    const source = resource
+      ? resourceLink(resource, "finding-source", resource.displayPath || resource.name)
+      : element("span", "finding-source", providerLabel(finding.provider) + " (no single file)");
     facts.append(factRow("File", source));
     facts.append(factRow("Action", finding.remediation || "No guidance is available for this rule yet."));
     card.append(facts);
@@ -922,16 +1050,73 @@ export const dashboardClientScript = String.raw`
     return row;
   }
 
-  function selectResource(resourceId) {
-    state.selectedResourceId = resourceId;
-    byId("detail-nav").hidden = false;
-    renderDetail();
-    renderInventory();
-    switchView("detail");
-  }
-
   function loadModeLabel(resource) {
     return ({ "context-loaded": "Loaded into context", "on-demand": "Available on demand", "explicitly-enabled": "Runs only when enabled" })[resource.loadMode] || "Unknown";
+  }
+
+  function formatBytes(bytes) {
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0) + " KiB";
+    return (bytes / (1024 * 1024)).toFixed(2) + " MiB";
+  }
+
+  function setPreviewStatus(message, isError) {
+    const status = byId("preview-status");
+    status.textContent = message;
+    status.hidden = false;
+    status.className = "preview-status" + (isError ? " is-error" : "");
+  }
+
+  // Previews are fetched per detail visit and never cached by the browser
+  // (the server sends no-store). Configuration files never get raw previews.
+  function renderPreview(resource) {
+    const lines = byId("preview-lines");
+    const meta = byId("preview-meta");
+    lines.replaceChildren();
+    meta.textContent = "";
+    byId("preview-status").hidden = true;
+    const request = ++state.previewRequest;
+    if (!state.options.previewableResourceIds.includes(resource.id)) {
+      setPreviewStatus(resource.kind === "instruction" || resource.kind === "skill"
+        ? "No preview: this resource is not backed by a readable file inside the scanned roots."
+        : "Configuration files are not previewed. The structured, redacted provider data below shows what was read from this file.", false);
+      return;
+    }
+    setPreviewStatus("Loading file content.", false);
+    api("/api/resources/" + encodeURIComponent(resource.id) + "/preview")
+      .then((preview) => {
+        if (request !== state.previewRequest) return;
+        if (preview.empty) {
+          setPreviewStatus("This file is empty.", false);
+          meta.textContent = "0 B";
+          return;
+        }
+        meta.textContent = plural(preview.lineCount, "line") + ", " + formatBytes(preview.size);
+        if (preview.truncated) {
+          setPreviewStatus("Showing the first " + formatBytes(preview.readBytes) + " of " + formatBytes(preview.size) + ". Open the file in an editor to read the rest.", false);
+        } else {
+          byId("preview-status").hidden = true;
+        }
+        const content = preview.content.endsWith("\n") ? preview.content.slice(0, -1) : preview.content;
+        content.split("\n").forEach((text, index) => {
+          const line = element("div", "preview-line");
+          line.append(element("span", "preview-number", index + 1), element("span", "preview-text", text));
+          lines.append(line);
+        });
+      })
+      .catch((error) => {
+        if (request !== state.previewRequest) return;
+        const code = error instanceof ApiError ? error.code : "";
+        const message = code === "resource_replaced" || code === "resource_missing"
+          ? "The file changed or disappeared after the scan, so it is not previewed. Relaunch Agent Config Doctor to rescan."
+          : code === "preview_too_large"
+            ? "This file is larger than 1 MiB and is not previewed. Open it in an editor instead."
+            : code === "preview_not_text"
+              ? "This file is not UTF-8 text, so no preview is shown."
+              : error instanceof Error ? error.message : "The preview could not be loaded.";
+        setPreviewStatus(message, true);
+        if (error instanceof ApiError && error.status === 401) showError(error);
+      });
   }
 
   function renderDetail() {
@@ -941,6 +1126,8 @@ export const dashboardClientScript = String.raw`
     byId("detail-subtitle").textContent = providerLabel(resource.provider) + " " + resource.kind + " at " + (resource.displayPath || "a non-file source");
     byId("detail-empty").hidden = true;
     byId("detail-content").hidden = false;
+
+    renderPreview(resource);
 
     const decision = decisionFor(resource);
     const status = operatorStatus(resource, decision);
@@ -954,7 +1141,7 @@ export const dashboardClientScript = String.raw`
       : inContext(resource)
         ? "This resource was not part of the effective configuration for this directory."
         : "Found in the repository outside the selected directory's ancestor chain, so it is never loaded here."));
-    panel.append(element("p", "", loadModeLabel(resource) + ". Controlled by " + ownerLabel(resource).toLowerCase().replace(/^you/, "you") + "."));
+    panel.append(element("p", "", loadModeLabel(resource) + ". Controlled by " + ownerLabel(resource).replace(/^You$/, "you") + "."));
     effective.replaceChildren(panel);
 
     const validation = byId("detail-validation");
@@ -979,7 +1166,7 @@ export const dashboardClientScript = String.raw`
       detailPair("Evidence", resource.evidenceType + ": " + resource.evidenceReceipt),
       detailPair("Source", resource.displayPath || "Not file-backed"),
     );
-    byId("detail-preview").textContent = JSON.stringify({ precedence: resource.precedence, capabilities: resource.capabilities, metadata: resource.metadata }, null, 2);
+    byId("detail-provider-json").textContent = JSON.stringify({ precedence: resource.precedence, capabilities: resource.capabilities, metadata: resource.metadata }, null, 2);
     byId("detail-raw-json").textContent = JSON.stringify(resource, null, 2);
     byId("detail-provider-data").open = false;
     byId("detail-raw").open = false;
@@ -1006,7 +1193,6 @@ export const dashboardClientScript = String.raw`
     renderControls();
     renderEffective();
     renderFindings();
-    if (state.selectedResourceId) renderDetail();
   }
 
   async function resourceAction(action) {
@@ -1022,30 +1208,41 @@ export const dashboardClientScript = String.raw`
       toast(action === "open" ? "Opened in editor." : "Revealed in file manager.");
     } catch (error) {
       toast(error instanceof Error ? error.message : "The action failed.", true);
+      if (error instanceof ApiError && error.status === 401) showError(error);
     }
   }
 
   document.querySelectorAll("[data-view]").forEach((item) => {
     item.addEventListener("click", (event) => {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
       event.preventDefault();
-      switchView(item.dataset.view);
+      if (!state.report) return;
+      navigate(item.getAttribute("href"));
     });
   });
-  ["inventory-search", "provider-filter", "kind-filter", "state-filter"].forEach((id) => {
-    byId(id).addEventListener(id === "inventory-search" ? "input" : "change", renderInventory);
+  for (const [, id] of filterFields) {
+    byId(id).addEventListener(id === "inventory-search" ? "input" : "change", () => {
+      renderInventory();
+      scheduleFilterSync();
+    });
+  }
+  byId("effective-provider").addEventListener("change", () => {
+    renderEffective();
+    scheduleFilterSync();
   });
-  byId("effective-provider").addEventListener("change", renderEffective);
   byId("copy-path").addEventListener("click", () => resourceAction("copy"));
   byId("reveal-resource").addEventListener("click", () => resourceAction("reveal"));
   byId("open-resource").addEventListener("click", () => resourceAction("open"));
+  window.addEventListener("popstate", () => {
+    if (state.report) applyLocation();
+  });
 
   Promise.all([api("/api/scan"), api("/api/options")])
     .then(([report, options]) => {
       state.report = report;
       state.options = options;
       renderAll();
-      const requestedView = location.hash.slice(1);
-      switchView(views.includes(requestedView) ? requestedView : "overview");
+      applyLocation();
     })
     .catch(showError);
 })();

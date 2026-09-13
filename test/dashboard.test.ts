@@ -82,7 +82,7 @@ test("finding cards and the detail validation section cannot squeeze text to zer
   assert.equal(dashboardStyles.includes("grid-template-columns: 76px 92px 110px"), false);
   assert.match(dashboardStyles, /\.finding-card\s*\{[^}]*min-width:\s*0/);
   assert.match(dashboardStyles, /\.finding-card[^{]*\{[^}]*overflow-wrap:\s*anywhere/);
-  assert.match(dashboardStyles, /\.detail-validation\s*\{[^}]*grid-column:\s*1 \/ -1/);
+  assert.match(dashboardStyles, /\.detail-validation[^{]*\{[^}]*grid-column:\s*1 \/ -1/);
 });
 
 test("dashboard client translates the data model into operator labels and groups", () => {
@@ -105,6 +105,49 @@ test("dashboard client translates the data model into operator labels and groups
   assert.match(dashboardClientScript, /finding\.impact/);
   assert.match(dashboardClientScript, /finding\.remediation/);
   assert.match(dashboardClientScript, /finding\.actionable/);
+});
+
+test("dashboard navigates with real routes and restores them from history", () => {
+  assert.match(dashboardClientScript, /history\.pushState/);
+  assert.match(dashboardClientScript, /addEventListener\("popstate"/);
+  // replaceState is reserved for stripping the credential fragment and for
+  // debounced filter changes; view changes never replace history entries.
+  assert.equal((dashboardClientScript.match(/history\.replaceState/g) ?? []).length, 2);
+  assert.match(dashboardClientScript, /filterSyncTimer = setTimeout\([\s\S]{0,800}?history\.replaceState/);
+  for (const route of ['"/installed"', '"/effective"', '"/findings"', '"/resources/"']) {
+    assert.ok(dashboardClientScript.includes(route), `missing route: ${route}`);
+  }
+  const document = dashboardDocument();
+  assert.match(document, /href="\/installed"/);
+  assert.match(document, /href="\/effective"/);
+  assert.match(document, /href="\/findings"/);
+  assert.equal(document.includes('href="#'), false);
+});
+
+test("dashboard keeps the credential in session storage and clears it on 401", () => {
+  assert.match(dashboardClientScript, /credentialKey = "agent-config-doctor-credential"/);
+  assert.match(dashboardClientScript, /sessionStorage\.setItem\(credentialKey/);
+  assert.match(dashboardClientScript, /sessionStorage\.removeItem\(credentialKey/);
+  assert.match(dashboardClientScript, /status === 401/);
+  assert.match(dashboardClientScript, /Relaunch Agent Config Doctor/);
+  assert.equal(dashboardClientScript.includes("localStorage"), false);
+  assert.equal(dashboardClientScript.includes("document.cookie"), false);
+});
+
+test("dashboard previews instruction and skill text with a privacy warning and explicit states", () => {
+  const document = dashboardDocument();
+  assert.match(document, /id="detail-content-preview"/);
+  assert.match(document, /id="preview-lines"/);
+  assert.match(document, /id="preview-status"/);
+  assert.match(document, /may contain sensitive material/);
+  assert.match(document, /before sharing a screenshot/);
+  assert.match(dashboardClientScript, /\/preview"/);
+  assert.match(dashboardClientScript, /previewableResourceIds/);
+  for (const state of ["empty", "truncated", "preview_too_large", "preview_not_text", "resource_replaced"]) {
+    assert.ok(dashboardClientScript.includes(state), `missing preview state: ${state}`);
+  }
+  assert.match(dashboardStyles, /\.preview-text\s*\{[^}]*white-space:\s*pre-wrap/);
+  assert.match(dashboardStyles, /\.preview-text\s*\{[^}]*overflow-wrap:\s*anywhere/);
 });
 
 test("dashboard renders scan values as text and authenticates every API request", () => {

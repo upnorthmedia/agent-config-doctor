@@ -54,6 +54,7 @@ const expectedPackedFiles = [
   "dist/providers/opencode.js",
   "dist/providers/shared.js",
   "dist/server/actions.js",
+  "dist/server/preview.js",
   "dist/server/server.js",
   "package.json",
 ].sort();
