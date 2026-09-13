@@ -28,11 +28,11 @@ export function dashboardDocument(): string {
 
     <aside class="side-nav" aria-label="Dashboard views">
       <nav>
-        <button class="nav-item is-active" type="button" data-view="overview">Overview</button>
-        <button class="nav-item" type="button" data-view="installed">Installed inventory</button>
-        <button class="nav-item" type="button" data-view="effective">Effective config</button>
-        <button class="nav-item" type="button" data-view="findings">Findings</button>
-        <button class="nav-item" type="button" data-view="detail" id="detail-nav" disabled>Resource detail</button>
+        <a class="nav-item is-active" href="#overview" data-view="overview">Overview</a>
+        <a class="nav-item" href="#installed" data-view="installed">Installed</a>
+        <a class="nav-item" href="#effective" data-view="effective">Effective</a>
+        <a class="nav-item" href="#findings" data-view="findings">Findings</a>
+        <a class="nav-item" href="#detail" data-view="detail" id="detail-nav" hidden>Resource detail</a>
       </nav>
       <div class="nav-note">
         <span class="nav-note-label">Local session</span>
@@ -43,42 +43,30 @@ export function dashboardDocument(): string {
     <main class="workspace">
       <div class="session-error" id="session-error" role="alert" hidden></div>
       <div class="scan-notices" id="scan-notices" role="status" hidden></div>
+
       <section class="view" id="view-overview" data-view-panel="overview">
         <div class="view-heading">
           <div>
-            <h1>Configuration at a glance</h1>
-            <p>One scan across installed harnesses, normalized without hiding provider differences. Totals cover the selected working directory and its ancestors; everything else found in the repository is listed separately in the inventory.</p>
+            <h1>Is my setup healthy here?</h1>
+            <p>One summary per harness for <code id="overview-directory"></code>. Counts cover only what this directory loads or can call on. Everything else on disk is listed under Installed.</p>
           </div>
           <span class="scan-time" id="scan-time">Scanning</span>
         </div>
-        <div class="summary-band" aria-label="Inventory summary">
-          <div><strong id="summary-providers">0</strong><span>detected providers</span></div>
-          <div><strong id="summary-resources">0</strong><span>resources in this context</span></div>
-          <div><strong id="summary-active">0</strong><span>active resources</span></div>
-          <div><strong id="summary-findings">0</strong><span>high confidence findings</span></div>
-        </div>
-        <div class="breakdown-band" aria-label="Resource breakdown">
-          <section><h2>By kind</h2><div class="breakdown-list" id="kind-breakdown"></div></section>
-          <section><h2>By state</h2><div class="breakdown-list" id="state-breakdown"></div></section>
-        </div>
         <div class="empty-state" id="new-user-empty" hidden>
           <h2>Your local scan is ready</h2>
-          <p>No supported agent configuration was discovered for this location. Add a provider instruction file or skill, then rerun Agent Config Doctor. The dashboard will keep unavailable providers visible so the first scan still explains what was checked.</p>
+          <p>No supported agent configuration was discovered for this location. Add a provider instruction file or skill, then rerun Agent Config Doctor. Unavailable providers stay visible so the first scan still explains what was checked.</p>
           <code>agent-config-doctor scan . --json</code>
         </div>
-        <section class="section-block" aria-labelledby="providers-heading">
-          <div class="section-heading"><h2 id="providers-heading">Provider coverage</h2><span id="provider-count"></span></div>
-          <div class="provider-list" id="provider-list"></div>
-        </section>
+        <div class="provider-summaries" id="overview-providers" aria-label="Provider summaries"></div>
         <section class="section-block" aria-labelledby="priority-heading">
-          <div class="section-heading"><h2 id="priority-heading">Priority findings</h2><button class="text-button" type="button" data-view="findings">View all findings</button></div>
+          <div class="section-heading"><h2 id="priority-heading">Fix first</h2><a class="text-button" href="#findings" data-view="findings">View all findings</a></div>
           <div class="finding-list" id="priority-findings"></div>
         </section>
       </section>
 
       <section class="view" id="view-installed" data-view-panel="installed" hidden>
         <div class="view-heading">
-          <div><h1>Installed inventory</h1><p>Discovered does not mean active. Search and narrow the complete local inventory.</p></div>
+          <div><h1>What configuration exists?</h1><p>Everything discovered on disk, grouped by who controls it. Discovered does not mean loaded: check Effective for what this directory uses.</p></div>
           <span class="result-count" id="inventory-count">0 resources</span>
         </div>
         <div class="filter-bar">
@@ -87,44 +75,79 @@ export function dashboardDocument(): string {
           <label><span>Kind</span><select id="kind-filter"><option value="all">All kinds</option></select></label>
           <label><span>State</span><select id="state-filter"><option value="all">All states</option></select></label>
         </div>
-        <div class="inventory-list" id="inventory-list"></div>
+        <div class="inventory-list" id="installed-groups"></div>
       </section>
 
       <section class="view" id="view-effective" data-view-panel="effective" hidden>
         <div class="view-heading">
-          <div><h1>Effective configuration</h1><p>The ordered resources this harness resolves for the selected working directory.</p></div>
+          <div><h1>What will this harness use in this directory?</h1><p>Instructions load into context in this order. Skills wait until an agent calls them. Integrations run only when enabled.</p></div>
         </div>
         <div class="context-controls">
           <label><span>Provider</span><select id="effective-provider"></select></label>
           <div class="cwd-control"><span>Working directory</span><code id="working-directory"></code></div>
         </div>
-        <div class="effective-summary" id="effective-summary"></div>
-        <div class="effective-list" id="effective-list"></div>
+        <p class="effective-summary" id="effective-summary"></p>
+        <section class="section-block" aria-labelledby="effective-instructions-heading">
+          <div class="section-heading"><h2 id="effective-instructions-heading">Loaded instructions</h2><span id="effective-instructions-count"></span></div>
+          <div class="effective-list" id="effective-instructions"></div>
+        </section>
+        <section class="section-block" aria-labelledby="effective-skills-heading">
+          <div class="section-heading"><h2 id="effective-skills-heading">Available skills</h2><span id="effective-skills-count"></span></div>
+          <div class="effective-list" id="effective-skills"></div>
+        </section>
+        <section class="section-block" aria-labelledby="effective-integrations-heading">
+          <div class="section-heading"><h2 id="effective-integrations-heading">Enabled integrations</h2><span id="effective-integrations-count"></span></div>
+          <div class="effective-list" id="effective-integrations"></div>
+        </section>
+        <section class="section-block" aria-labelledby="effective-other-heading">
+          <div class="section-heading"><h2 id="effective-other-heading">Not used here</h2><span id="effective-other-count"></span></div>
+          <div class="effective-list" id="effective-other"></div>
+        </section>
+        <details class="collapsed-group" id="effective-elsewhere" hidden>
+          <summary class="inventory-group-heading"><span>Elsewhere in repository</span><span id="effective-elsewhere-count"></span></summary>
+          <p class="group-note">Found in this repository but outside the selected directory's ancestor chain. This harness does not use them here.</p>
+          <div class="effective-list" id="effective-elsewhere-list"></div>
+        </details>
       </section>
 
       <section class="view" id="view-findings" data-view-panel="findings" hidden>
         <div class="view-heading">
-          <div><h1>Findings</h1><p>Deterministic checks and bounded evidence, ordered by severity and confidence.</p></div>
+          <div><h1>What should I fix?</h1><p>Problems in files you control come first. Notes about provider-managed files and files elsewhere in the repository are collapsed below.</p></div>
           <span class="result-count" id="finding-count">0 findings</span>
         </div>
-        <div class="finding-list finding-list-full" id="finding-list"></div>
+        <div class="finding-list" id="findings-actionable"></div>
+        <details class="collapsed-group" id="findings-reference" hidden>
+          <summary class="inventory-group-heading"><span>For reference</span><span id="findings-reference-count"></span></summary>
+          <p class="group-note">Managed by a provider, plugin, package, or administrator. Shown so the scan is complete, not because you need to act.</p>
+          <div class="finding-list" id="findings-reference-list"></div>
+        </details>
+        <details class="collapsed-group" id="findings-elsewhere" hidden>
+          <summary class="inventory-group-heading"><span>Elsewhere in repository</span><span id="findings-elsewhere-count"></span></summary>
+          <p class="group-note">These files sit outside the selected directory's ancestor chain and do not affect this directory.</p>
+          <div class="finding-list" id="findings-elsewhere-list"></div>
+        </details>
       </section>
 
       <section class="view" id="view-detail" data-view-panel="detail" hidden>
         <div class="view-heading detail-heading">
-          <div><h1 id="detail-title">Resource detail</h1><p id="detail-subtitle">Select a resource from inventory, effective config, or findings.</p></div>
+          <div><p class="view-kicker">What is this file and why does it matter?</p><h1 id="detail-title">Resource detail</h1><p id="detail-subtitle">Select a resource from Installed, Effective, or Findings.</p></div>
           <div class="action-row" id="resource-actions" hidden>
             <button type="button" id="copy-path">Copy path</button>
             <button type="button" id="reveal-resource">Reveal</button>
             <button class="primary-button" type="button" id="open-resource">Open in editor</button>
           </div>
         </div>
-        <div class="detail-empty" id="detail-empty"><p>No resource selected yet.</p><button type="button" data-view="installed">Browse installed inventory</button></div>
+        <div class="detail-empty" id="detail-empty"><p>No resource selected yet.</p><a class="button-link" href="#installed" data-view="installed">Browse installed configuration</a></div>
         <div class="detail-layout" id="detail-content" hidden>
-          <section class="detail-section"><h2>Normalized metadata</h2><dl id="detail-metadata"></dl></section>
-          <section class="detail-section"><h2>Effective status</h2><div id="detail-effective"></div></section>
-          <section class="detail-section detail-preview"><h2>Redacted provider data</h2><pre id="detail-preview"></pre></section>
-          <section class="detail-section"><h2>Validation</h2><div class="finding-list" id="detail-findings"></div></section>
+          <section class="detail-section detail-status"><h2>Effective status</h2><div id="detail-effective"></div></section>
+          <section class="detail-section detail-validation"><h2>Validation</h2><div class="finding-list" id="detail-validation"></div></section>
+          <section class="detail-section detail-metadata"><h2>Metadata</h2><dl id="detail-metadata"></dl></section>
+          <section class="detail-section detail-provider">
+            <details id="detail-provider-data"><summary>Redacted provider data</summary><pre id="detail-preview"></pre></details>
+          </section>
+          <section class="detail-section detail-raw-section">
+            <details id="detail-raw"><summary>Raw JSON</summary><pre id="detail-raw-json"></pre></details>
+          </section>
         </div>
       </section>
     </main>
@@ -157,6 +180,7 @@ export const dashboardStyles = `
   --inset: #0b0d12;
   --inverse-text: #fff;
   --error-text: #ffd5d2;
+  --mono: ui-monospace, "SFMono-Regular", Consolas, monospace;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
@@ -164,12 +188,13 @@ export const dashboardStyles = `
 html, body { min-height: 100%; margin: 0; }
 body { background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.45; }
 button, input, select { font: inherit; }
-button, select { cursor: pointer; }
+button, select, summary { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: 0.45; }
 ::selection { background: color-mix(in srgb, var(--accent) 38%, transparent); color: var(--inverse-text); }
 * { scrollbar-color: var(--border-strong) var(--panel); scrollbar-width: thin; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 [hidden] { display: none !important; }
+code { font-family: var(--mono); font-size: 0.93em; }
 
 .app-shell {
   min-height: 100vh;
@@ -212,6 +237,7 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 
 .side-nav nav { display: grid; gap: 3px; }
 .nav-item {
+  display: block;
   width: 100%;
   padding: 8px 10px;
   border: 1px solid transparent;
@@ -219,6 +245,7 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
   background: transparent;
   color: var(--muted);
   text-align: left;
+  text-decoration: none;
   transition: background-color 160ms ease-out, color 160ms ease-out, border-color 160ms ease-out;
 }
 .nav-item:hover { color: var(--text); background: var(--panel-2); }
@@ -229,85 +256,103 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .workspace { grid-area: workspace; min-width: 0; padding: 30px clamp(20px, 4vw, 54px) 56px; }
 .view { width: min(1180px, 100%); margin: 0 auto; }
 .view-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 22px; }
-.view-heading h1 { margin: 0 0 5px; font-size: 21px; line-height: 1.2; letter-spacing: -0.02em; }
-.view-heading p { max-width: 72ch; margin: 0; color: var(--muted); }
+.view-heading > div { min-width: 0; }
+.view-heading h1 { margin: 0 0 5px; font-size: 21px; line-height: 1.2; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+.view-heading p { max-width: 72ch; margin: 0; color: var(--muted); overflow-wrap: anywhere; }
+.view-kicker { margin: 0 0 4px; color: var(--quiet); font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.05em; }
 .scan-time, .result-count { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .session-error { width: min(1180px, 100%); margin: 0 auto 20px; padding: 10px 12px; color: var(--error-text); background: color-mix(in srgb, var(--error) 9%, transparent); border: 1px solid color-mix(in srgb, var(--error) 35%, transparent); border-radius: 6px; }
 .scan-notices { width: min(1180px, 100%); margin: 0 auto 20px; display: grid; gap: 8px; }
 .scan-notice { padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); border-radius: 6px; background: color-mix(in srgb, var(--warn) 8%, transparent); color: var(--text); }
 .scan-notice strong { display: block; margin-bottom: 3px; color: var(--warn); font-size: 12px; }
-.scan-notice p { margin: 0; color: var(--muted); font-size: 12px; }
+.scan-notice p { margin: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .scan-notice p + p { margin-top: 4px; }
-.status-badge.incomplete { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, transparent); background: color-mix(in srgb, var(--warn) 7%, transparent); }
-.summary-band { display: grid; grid-template-columns: repeat(4, 1fr); margin-bottom: 32px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-.summary-band > div { min-width: 0; padding: 16px 18px; display: grid; gap: 3px; border-right: 1px solid var(--border); }
-.summary-band > div:last-child { border-right: 0; }
-.summary-band strong { font-size: 20px; line-height: 1; font-weight: 680; font-variant-numeric: tabular-nums; }
-.summary-band span { color: var(--muted); font-size: 11px; }
-.breakdown-band { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin: -18px 0 32px; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--border); }
-.breakdown-band section { min-width: 0; padding: 12px 16px; background: var(--panel); }
-.breakdown-band h2 { margin: 0 0 8px; color: var(--muted); font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.05em; }
-.breakdown-list { display: flex; flex-wrap: wrap; gap: 6px 14px; }
-.breakdown-item { display: inline-flex; gap: 5px; color: var(--muted); font-size: 11px; text-transform: capitalize; }
-.breakdown-item strong { color: var(--text); font-variant-numeric: tabular-nums; }
+
+.provider-summaries { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-bottom: 8px; }
+.provider-card { min-width: 0; display: grid; gap: 10px; padding: 14px 16px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
+.provider-card.is-unavailable { opacity: 0.72; }
+.provider-card header { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.provider-name { min-width: 0; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.provider-version { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.provider-card header .status-badge { margin-left: auto; }
+.provider-counts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; margin: 0; }
+.provider-counts > div { min-width: 0; display: grid; gap: 2px; }
+.provider-counts dt { color: var(--muted); font-size: 11px; }
+.provider-counts dd { margin: 0; font-size: 18px; font-weight: 680; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.provider-counts dd.is-attention { color: var(--warn); }
+.provider-note { margin: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.provider-note.is-warning { color: var(--warn); }
+.provider-card .text-button { justify-self: start; }
 
 .section-block { margin-top: 30px; }
 .section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 9px; }
 .section-heading h2, .detail-section h2 { margin: 0; font-size: 13px; font-weight: 650; }
-.section-heading > span { color: var(--quiet); font-size: 11px; }
-.text-button { padding: 0; border: 0; background: transparent; color: var(--accent); font-size: 12px; }
+.section-heading > span { color: var(--quiet); font-size: 11px; font-variant-numeric: tabular-nums; }
+.text-button { padding: 0; border: 0; background: transparent; color: var(--accent); font-size: 12px; text-decoration: none; }
 .text-button:hover { color: var(--accent-hover); text-decoration: underline; text-underline-offset: 3px; }
 
-.provider-list, .finding-list, .effective-list, .inventory-list { border-top: 1px solid var(--border); }
-.provider-row { display: grid; grid-template-columns: minmax(130px, 1fr) 110px 110px 100px; align-items: center; gap: 14px; min-height: 48px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
-.provider-name { font-weight: 620; }
-.provider-version, .provider-resource-count { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.status-badge { justify-self: start; padding: 2px 7px; border: 1px solid var(--border-strong); border-radius: 999px; color: var(--muted); font-size: 10px; text-transform: capitalize; }
+.finding-list, .effective-list, .inventory-list { border-top: 1px solid var(--border); }
+.status-badge { flex: 0 0 auto; justify-self: start; padding: 2px 7px; border: 1px solid var(--border-strong); border-radius: 999px; color: var(--muted); font-size: 10px; white-space: nowrap; }
 .status-badge.active, .status-badge.supported { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, transparent); background: color-mix(in srgb, var(--ok) 7%, transparent); }
-.status-badge.blocked, .status-badge.invalid, .status-badge.error { color: var(--error); border-color: color-mix(in srgb, var(--error) 35%, transparent); background: color-mix(in srgb, var(--error) 7%, transparent); }
-.status-badge.shadowed, .status-badge.disabled, .status-badge.warning, .status-badge.unsupported { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, transparent); background: color-mix(in srgb, var(--warn) 7%, transparent); }
+.status-badge.error, .status-badge.unavailable { color: var(--error); border-color: color-mix(in srgb, var(--error) 35%, transparent); background: color-mix(in srgb, var(--error) 7%, transparent); }
+.status-badge.warning, .status-badge.unsupported, .status-badge.incomplete { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, transparent); background: color-mix(in srgb, var(--warn) 7%, transparent); }
+.status-badge.info { color: var(--info); border-color: color-mix(in srgb, var(--info) 35%, transparent); background: color-mix(in srgb, var(--info) 7%, transparent); }
 
 .filter-bar, .context-controls { display: grid; grid-template-columns: minmax(240px, 1.5fr) repeat(3, minmax(130px, 0.65fr)); gap: 10px; margin-bottom: 20px; padding: 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
 .context-controls { grid-template-columns: minmax(180px, 0.6fr) minmax(280px, 1.4fr); }
 .filter-bar label, .context-controls label, .context-controls .cwd-control { display: grid; gap: 5px; color: var(--muted); font-size: 10px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.045em; }
-.cwd-control code { display: flex; align-items: center; min-height: 34px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); color: var(--text); font: 12px ui-monospace, "SFMono-Regular", Consolas, monospace; text-transform: none; letter-spacing: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cwd-control code { display: flex; align-items: center; min-height: 34px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); color: var(--text); font: 12px var(--mono); text-transform: none; letter-spacing: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 input, select { width: 100%; min-height: 34px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); color: var(--text); outline: none; }
 input::placeholder { color: var(--muted); }
 input:hover, select:hover { border-color: var(--border-strong); }
 input:focus, select:focus { border-color: var(--accent); }
 
-.inventory-group { margin-bottom: 20px; }
-.finding-group { margin-top: 20px; }
-.finding-group > summary { cursor: pointer; list-style: none; }
-.finding-group > summary::-webkit-details-marker { display: none; }
-.finding-group > summary::before { content: "+ "; }
-.finding-group[open] > summary::before { content: "- "; }
-.inventory-group-heading { display: flex; justify-content: space-between; gap: 12px; padding: 8px 3px; color: var(--muted); font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.055em; }
-.resource-row { width: 100%; display: grid; grid-template-columns: minmax(180px, 1.4fr) 90px 80px 80px minmax(160px, 1fr) 82px; align-items: center; gap: 12px; min-height: 49px; padding: 8px 10px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; color: var(--text); text-align: left; }
+.inventory-group, .collapsed-group { margin-bottom: 18px; }
+.collapsed-group { margin-top: 26px; }
+.inventory-group > summary, .collapsed-group > summary { list-style: none; }
+.inventory-group > summary::-webkit-details-marker, .collapsed-group > summary::-webkit-details-marker { display: none; }
+.inventory-group > summary::before, .collapsed-group > summary::before { content: "+"; display: inline-block; width: 14px; color: var(--quiet); }
+.inventory-group[open] > summary::before, .collapsed-group[open] > summary::before { content: "-"; }
+.inventory-group-heading { display: flex; align-items: baseline; gap: 6px; padding: 8px 3px; color: var(--muted); font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.055em; }
+.inventory-group-heading span:last-child { margin-left: auto; font-variant-numeric: tabular-nums; }
+.group-note { margin: 0 0 8px; padding: 0 3px; color: var(--quiet); font-size: 12px; }
+
+.resource-row { width: 100%; display: grid; grid-template-columns: minmax(180px, 1.4fr) 90px 80px minmax(160px, 1fr) 132px; align-items: center; gap: 12px; min-height: 49px; padding: 8px 10px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; color: var(--text); text-align: left; }
 .resource-row:first-of-type { border-top: 1px solid var(--border); }
 .resource-row:hover { background: var(--panel); }
 .resource-row.is-selected { background: var(--panel-2); }
 .resource-name { min-width: 0; font-weight: 620; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.resource-kind, .resource-provider, .resource-scope { color: var(--muted); font-size: 11px; text-transform: capitalize; }
-.resource-path { min-width: 0; color: var(--quiet); font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.resource-kind, .resource-provider { color: var(--muted); font-size: 11px; text-transform: capitalize; }
+.resource-path { min-width: 0; color: var(--quiet); font-family: var(--mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.finding-row { display: grid; grid-template-columns: 76px 92px 110px minmax(0, 1fr) minmax(180px, 0.55fr); gap: 12px; align-items: start; padding: 11px 8px; border-bottom: 1px solid var(--border); }
-.finding-confidence { color: var(--muted); font-size: 11px; text-transform: capitalize; }
-.finding-code { color: var(--muted); font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: 11px; overflow-wrap: anywhere; }
-.finding-message { color: var(--text); }
-.finding-source { min-width: 0; padding: 0; border: 0; background: none; color: var(--muted); font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: 11px; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.finding-card { min-width: 0; display: grid; gap: 8px; padding: 12px 10px; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.finding-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.finding-title { min-width: 0; margin: 0; font-size: 14px; font-weight: 620; }
+.finding-facts { display: grid; gap: 4px; margin: 0; }
+.finding-facts > div, .finding-technical dl > div { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 4px 12px; }
+.finding-facts dt { color: var(--muted); font-size: 12px; }
+.finding-facts dd { min-width: 0; margin: 0; }
+.finding-source { min-width: 0; max-width: 100%; padding: 0; border: 0; background: none; color: var(--muted); font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; text-align: left; }
 .finding-source:not(:disabled):hover { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.finding-technical > summary { color: var(--quiet); font-size: 12px; list-style: none; }
+.finding-technical > summary::-webkit-details-marker { display: none; }
+.finding-technical > summary::before { content: "+ "; }
+.finding-technical[open] > summary::before { content: "- "; }
+.finding-technical dl { display: grid; gap: 4px; margin: 8px 0 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--inset); font-size: 12px; }
+.finding-technical dt { color: var(--muted); }
+.finding-technical dd { min-width: 0; margin: 0; font-family: var(--mono); overflow-wrap: anywhere; }
 
-.effective-summary { margin: 4px 0 10px; color: var(--muted); font-size: 12px; }
-.effective-row { display: grid; grid-template-columns: 38px minmax(170px, 0.8fr) 92px minmax(220px, 1.5fr); gap: 12px; align-items: start; padding: 11px 8px; border-bottom: 1px solid var(--border); }
+.effective-summary { margin: 4px 0 6px; color: var(--muted); font-size: 12px; }
+.effective-row { display: grid; grid-template-columns: 38px minmax(170px, 0.8fr) 132px minmax(220px, 1.5fr); gap: 12px; align-items: start; padding: 11px 8px; border-bottom: 1px solid var(--border); }
 .effective-order { color: var(--quiet); font-variant-numeric: tabular-nums; text-align: right; }
-.effective-name { padding: 0; border: 0; background: none; color: var(--text); text-align: left; font-weight: 620; }
+.effective-name { min-width: 0; padding: 0; border: 0; background: none; color: var(--text); text-align: left; font-weight: 620; overflow-wrap: anywhere; }
 .effective-name:hover { color: var(--accent); }
-.effective-reason { color: var(--muted); }
+.effective-reason { min-width: 0; color: var(--muted); overflow-wrap: anywhere; }
 
-button { min-height: 32px; padding: 6px 11px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); color: var(--text); transition: border-color 160ms ease-out, background-color 160ms ease-out, color 160ms ease-out; }
-button:hover:not(:disabled) { border-color: var(--accent); }
+button, .button-link { min-height: 32px; padding: 6px 11px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); color: var(--text); text-decoration: none; transition: border-color 160ms ease-out, background-color 160ms ease-out, color 160ms ease-out; }
+.button-link { display: inline-flex; align-items: center; }
+button:hover:not(:disabled), .button-link:hover { border-color: var(--accent); }
 .primary-button { background: var(--accent); border-color: var(--accent); color: var(--inverse-text); }
 .primary-button:hover:not(:disabled) { background: var(--accent-hover); }
 .action-row { display: flex; flex-wrap: wrap; gap: 7px; justify-content: flex-end; }
@@ -319,15 +364,24 @@ button:hover:not(:disabled) { border-color: var(--accent); }
 .detail-section dl > div { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 12px; padding: 8px 3px; border-bottom: 1px solid var(--border); }
 .detail-section dt { color: var(--muted); }
 .detail-section dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
-.detail-preview { grid-column: 1 / -1; }
-pre { max-height: 330px; margin: 0; padding: 14px 16px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--inset); color: var(--text); font: 12px/1.55 ui-monospace, "SFMono-Regular", Consolas, monospace; tab-size: 2; }
-.effective-detail-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 3px; border-bottom: 1px solid var(--border); }
-.effective-detail-row span:last-child { color: var(--muted); text-align: right; }
+.detail-validation { grid-column: 1 / -1; }
+.detail-provider, .detail-raw-section { grid-column: 1 / -1; }
+.detail-section details > summary { color: var(--muted); font-size: 13px; font-weight: 650; list-style: none; }
+.detail-section details > summary::-webkit-details-marker { display: none; }
+.detail-section details > summary::before { content: "+ "; color: var(--quiet); }
+.detail-section details[open] > summary::before { content: "- "; }
+.detail-section details > pre { margin-top: 10px; }
+pre { max-height: 330px; margin: 0; padding: 14px 16px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--inset); color: var(--text); font: 12px/1.55 var(--mono); tab-size: 2; }
+.effective-detail { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); }
+.effective-detail-head { display: flex; align-items: center; gap: 10px; }
+.effective-detail-head strong { font-weight: 620; }
+.effective-detail p { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
 .detail-empty, .empty-state, .list-empty { padding: 28px; border: 1px dashed var(--border-strong); border-radius: 8px; color: var(--muted); text-align: center; }
+.detail-empty p { margin: 0 0 12px; }
 .empty-state { margin-bottom: 30px; text-align: left; background: var(--panel); }
 .empty-state h2 { margin: 0 0 7px; color: var(--text); font-size: 16px; }
 .empty-state p { max-width: 72ch; margin: 0 0 14px; }
-.empty-state code { display: inline-block; padding: 6px 9px; border-radius: 6px; background: var(--inset); color: var(--text); font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.empty-state code { display: inline-block; padding: 6px 9px; border-radius: 6px; background: var(--inset); color: var(--text); font-family: var(--mono); }
 
 .toast { position: fixed; right: 20px; bottom: 20px; z-index: 20; max-width: min(380px, calc(100vw - 40px)); padding: 9px 12px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--panel-3); color: var(--text); box-shadow: 0 12px 32px color-mix(in srgb, var(--bg) 70%, transparent); opacity: 0; pointer-events: none; transform: translateY(8px); transition: opacity 180ms ease-out, transform 180ms ease-out; }
 .toast.is-visible { opacity: 1; transform: translateY(0); }
@@ -336,10 +390,8 @@ pre { max-height: 330px; margin: 0; padding: 14px 16px; overflow: auto; border: 
 @media (max-width: 920px) {
   .filter-bar { grid-template-columns: repeat(3, 1fr); }
   .search-field { grid-column: 1 / -1; }
-  .resource-row { grid-template-columns: minmax(180px, 1fr) 90px 80px 82px; }
-  .resource-scope, .resource-path { display: none; }
-  .finding-row { grid-template-columns: 70px 90px 100px minmax(0, 1fr); }
-  .finding-source { grid-column: 4; }
+  .resource-row { grid-template-columns: minmax(180px, 1fr) 90px 80px 132px; }
+  .resource-path { display: none; }
 }
 
 @media (max-width: 760px) {
@@ -352,25 +404,18 @@ pre { max-height: 330px; margin: 0; padding: 14px 16px; overflow: auto; border: 
   .workspace { padding: 22px 14px 42px; }
   .view-heading, .detail-heading { display: grid; gap: 14px; }
   .scan-time, .result-count { justify-self: start; }
-  .summary-band { grid-template-columns: 1fr 1fr; }
-  .summary-band > div:nth-child(2) { border-right: 0; }
-  .summary-band > div:nth-child(-n + 2) { border-bottom: 1px solid var(--border); }
-  .breakdown-band { grid-template-columns: 1fr; }
+  .provider-summaries { grid-template-columns: 1fr; }
   .context-controls, .filter-bar { grid-template-columns: 1fr; }
   .search-field { grid-column: auto; }
-  .provider-row { grid-template-columns: minmax(120px, 1fr) 90px; }
-  .provider-resource-count { display: none; }
-  .provider-row .status-badge { justify-self: end; }
-  .resource-row { grid-template-columns: minmax(0, 1fr) 70px 82px; }
+  .resource-row { grid-template-columns: minmax(0, 1fr) 70px 120px; }
   .resource-provider { display: none; }
   .resource-row .status-badge { justify-self: end; }
-  .finding-row { grid-template-columns: 70px 90px minmax(0, 1fr); }
-  .finding-code { grid-column: 3; }
-  .finding-message, .finding-source { grid-column: 1 / -1; }
-  .effective-row { grid-template-columns: 30px minmax(0, 1fr) 88px; }
+  .finding-facts > div, .finding-technical dl > div { grid-template-columns: 1fr; gap: 2px; }
+  .finding-facts dt, .finding-technical dt { margin-top: 4px; }
+  .effective-row { grid-template-columns: 30px minmax(0, 1fr) auto; }
   .effective-reason { grid-column: 2 / -1; }
   .detail-layout { grid-template-columns: 1fr; }
-  .detail-preview { grid-column: auto; }
+  .detail-section dl > div { grid-template-columns: 1fr; gap: 2px; }
   .action-row { justify-content: flex-start; }
   .scan-context { max-width: 48vw; }
 }
@@ -384,16 +429,26 @@ export const dashboardClientScript = String.raw`
 (() => {
   "use strict";
   const byId = (id) => document.getElementById(id);
+  const views = ["overview", "installed", "effective", "findings"];
   const state = {
     report: null,
     options: null,
     selectedResourceId: null,
     view: "overview",
+    openGroups: new Set(["My configuration", "Administrator configuration"]),
   };
   const actionEndpoints = {
     open: "/api/actions/open",
     reveal: "/api/actions/reveal",
   };
+  const groupOrder = [
+    "My configuration",
+    "Administrator configuration",
+    "Plugins",
+    "Provider-managed",
+    "Elsewhere in repository",
+  ];
+  const severityOrder = { error: 0, warning: 1, info: 2 };
   let toastTimer;
 
   function element(tag, className, text) {
@@ -455,20 +510,71 @@ export const dashboardClientScript = String.raw`
 
   function ownerLabel(resource) {
     const owner = resource.owner;
-    const base = owner.type === "self" ? "You" : owner.type === "provider" ? "Provider-managed (" + providerLabel(owner.id || resource.provider) + ")" : owner.type === "plugin" ? "Plugin " + (owner.id || "unknown") : owner.type === "administrator" ? "Administrator" : "Package" + (owner.id ? " " + owner.id : "");
+    const base = owner.type === "self" ? "You"
+      : owner.type === "provider" ? "Provider-managed" + " (" + providerLabel(owner.id || resource.provider) + ")"
+      : owner.type === "plugin" ? "Plugin " + (owner.id || "unknown")
+      : owner.type === "administrator" ? "Administrator"
+      : "Package" + (owner.id ? " " + owner.id : "");
     return resource.generated ? base + ", generated copy" : base;
   }
 
-  function inContext(resource) {
-    return resource.reach !== "repository";
+  function inContext(item) {
+    return item.reach !== "repository";
   }
 
   function contextResources() {
     return state.report.resources.filter(inContext);
   }
 
-  function contextFindings() {
-    return state.report.findings.filter(inContext);
+  function decisionFor(resource) {
+    const effective = state.report.effective[resource.provider];
+    return effective ? effective.decisions.find((decision) => decision.resourceId === resource.id) : undefined;
+  }
+
+  // Operator-facing status. One label answers "does this apply here?" without
+  // asking the reader to combine state, reach, kind, and load mode.
+  function operatorStatus(resource, decision) {
+    if (!inContext(resource)) return { label: "Elsewhere in repository", tone: "" };
+    const current = decision ? decision.state : resource.state;
+    if (current === "active") {
+      if (resource.kind === "instruction") return { label: "Loaded", tone: "active" };
+      if (resource.kind === "skill") return { label: "Available on demand", tone: "active" };
+      return { label: "Enabled", tone: "active" };
+    }
+    if (current === "unavailable") return { label: "Missing", tone: "error" };
+    if (current === "blocked") return { label: "Blocked", tone: "error" };
+    if (current === "invalid") return { label: "Invalid", tone: "error" };
+    if (current === "disabled") return { label: "Disabled", tone: "warning" };
+    if (current === "shadowed") return { label: "Shadowed", tone: "warning" };
+    return { label: "Not loaded", tone: "" };
+  }
+
+  function statusBadge(status) {
+    return element("span", "status-badge " + status.tone, status.label);
+  }
+
+  function badge(value) {
+    return element("span", "status-badge " + value, value);
+  }
+
+  function groupFor(resource) {
+    if (!inContext(resource)) return "Elsewhere in repository";
+    const owner = resource.owner.type;
+    if (resource.kind === "plugin" || owner === "plugin" || owner === "package") return "Plugins";
+    if (owner === "administrator") return "Administrator configuration";
+    if (owner === "provider" || resource.generated) return "Provider-managed";
+    return "My configuration";
+  }
+
+  function isActionable(finding) {
+    return finding.actionable === true && inContext(finding);
+  }
+
+  function sortFindings(findings) {
+    return [...findings].sort((left, right) =>
+      severityOrder[left.severity] - severityOrder[right.severity]
+      || (left.title || left.message).localeCompare(right.title || right.message)
+      || left.code.localeCompare(right.code));
   }
 
   function switchView(view) {
@@ -477,32 +583,11 @@ export const dashboardClientScript = String.raw`
     document.querySelectorAll("[data-view-panel]").forEach((panel) => {
       panel.hidden = panel.dataset.viewPanel !== view;
     });
-    document.querySelectorAll(".nav-item[data-view]").forEach((button) => {
-      button.classList.toggle("is-active", button.dataset.view === view);
+    document.querySelectorAll(".nav-item[data-view]").forEach((item) => {
+      item.classList.toggle("is-active", item.dataset.view === view);
     });
     history.replaceState(null, "", "#" + view);
-  }
-
-  function statusBadge(value) {
-    return element("span", "status-badge " + value, value);
-  }
-
-  function renderBreakdown(containerId, resources, key) {
-    const counts = new Map();
-    for (const resource of resources) {
-      counts.set(resource[key], (counts.get(resource[key]) || 0) + 1);
-    }
-    const container = byId(containerId);
-    container.replaceChildren();
-    if (counts.size === 0) {
-      container.append(element("span", "breakdown-item", "None discovered"));
-      return;
-    }
-    for (const [label, count] of [...counts].sort(([left], [right]) => left.localeCompare(right))) {
-      const item = element("span", "breakdown-item");
-      item.append(element("strong", "", count), element("span", "", label));
-      container.append(item);
-    }
+    window.scrollTo(0, 0);
   }
 
   function renderNotices() {
@@ -521,41 +606,86 @@ export const dashboardClientScript = String.raw`
     }
   }
 
+  function providerSummary(provider) {
+    const resources = contextResources().filter((resource) => resource.provider === provider.provider);
+    const effective = state.report.effective[provider.provider];
+    const activeIds = new Set((effective ? effective.decisions : []).filter((decision) => decision.state === "active").map((decision) => decision.resourceId));
+    const count = (predicate) => resources.filter((resource) => activeIds.has(resource.id) && predicate(resource)).length;
+    return {
+      instructions: count((resource) => resource.kind === "instruction"),
+      skills: count((resource) => resource.kind === "skill"),
+      integrations: count((resource) => resource.kind === "mcp" || resource.kind === "plugin"),
+      actionable: state.report.findings.filter((finding) => finding.provider === provider.provider && isActionable(finding)).length,
+      notices: (state.report.notices || []).filter((notice) => notice.provider === provider.provider),
+    };
+  }
+
   function renderOverview() {
-    const resources = contextResources();
-    const active = resources.filter((resource) => resource.state === "active").length;
-    const highConfidence = contextFindings().filter((finding) => finding.confidence === "high");
-    const detected = state.report.providers.filter((provider) => provider.installed).length;
-    byId("summary-providers").textContent = detected;
-    byId("summary-resources").textContent = resources.length;
-    byId("summary-active").textContent = active;
-    byId("summary-findings").textContent = highConfidence.length;
     const scannedAt = new Date(state.options.scannedAt);
     byId("scan-time").textContent = Number.isNaN(scannedAt.getTime())
       ? "Scan complete"
       : "Scanned " + scannedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
     byId("header-context").textContent = state.report.subject.workingDirectory;
+    byId("overview-directory").textContent = state.report.subject.workingDirectory;
     byId("new-user-empty").hidden = state.report.resources.length !== 0;
-    renderBreakdown("kind-breakdown", resources, "kind");
-    renderBreakdown("state-breakdown", resources, "state");
 
-    const providerList = byId("provider-list");
-    providerList.replaceChildren();
+    const list = byId("overview-providers");
+    list.replaceChildren();
     for (const provider of state.report.providers) {
-      const row = element("div", "provider-row");
-      row.append(
+      const card = element("article", "provider-card" + (provider.installed ? "" : " is-unavailable"));
+      const head = element("header");
+      head.append(
         element("span", "provider-name", providerLabel(provider.provider)),
         element("span", "provider-version", provider.installed ? provider.version : "not detected"),
-        element("span", "provider-resource-count", plural(resources.filter((resource) => resource.provider === provider.provider).length, "resource")),
-        statusBadge(provider.complete === false ? "incomplete" : provider.support),
+        badge(provider.complete === false ? "incomplete" : provider.support),
       );
-      providerList.append(row);
+      card.append(head);
+      if (provider.support === "supported") {
+        const summary = providerSummary(provider);
+        const counts = element("dl", "provider-counts");
+        for (const [label, value, attention] of [
+          ["Loaded instructions", summary.instructions, false],
+          ["Available skills", summary.skills, false],
+          ["Enabled integrations", summary.integrations, false],
+          ["Actionable findings", summary.actionable, summary.actionable > 0],
+        ]) {
+          const item = element("div");
+          const dd = element("dd", attention ? "is-attention" : "", value);
+          item.append(element("dt", "", label), dd);
+          counts.append(item);
+        }
+        card.append(counts);
+        for (const notice of summary.notices) {
+          card.append(element("p", "provider-note is-warning", "Scan incomplete: " + notice.command + " did not finish. See the notice above for how to rerun it."));
+        }
+        const link = element("a", "text-button", "View effective configuration");
+        link.href = "#effective";
+        link.addEventListener("click", (event) => {
+          event.preventDefault();
+          byId("effective-provider").value = provider.provider;
+          renderEffective();
+          switchView("effective");
+        });
+        card.append(link);
+      } else {
+        card.append(element("p", "provider-note", provider.support === "unsupported"
+          ? "Installed version " + provider.version + " is not supported, so its configuration was not scanned."
+          : "Not detected on this machine. Nothing was scanned for this provider."));
+      }
+      list.append(card);
     }
-    byId("provider-count").textContent = plural(state.report.providers.length, "adapter");
 
     const priority = byId("priority-findings");
     priority.replaceChildren();
-    renderFindingsInto(priority, highConfidence.slice(0, 5));
+    const actionable = sortFindings(state.report.findings.filter(isActionable));
+    const reference = state.report.findings.filter((finding) => inContext(finding) && !isActionable(finding)).length;
+    if (actionable.length === 0) {
+      priority.append(element("div", "list-empty", reference > 0
+        ? "Nothing needs your attention. " + plural(reference, "note is", "notes are") + " listed under Findings for reference."
+        : "Nothing needs your attention."));
+      return;
+    }
+    renderFindingsInto(priority, actionable.slice(0, 5));
   }
 
   function fillSelect(select, values, allLabel) {
@@ -595,32 +725,25 @@ export const dashboardClientScript = String.raw`
       const owner = resource.owner.id || resource.owner.type;
       return [resource.name, resource.displayPath, resource.origin, owner].some((value) => String(value || "").toLowerCase().includes(query));
     });
-    byId("inventory-count").textContent = plural(filtered.length, "resource");
-    const list = byId("inventory-list");
+    byId("inventory-count").textContent = plural(filtered.length, "resource") + (filtered.length === state.report.resources.length ? "" : " of " + state.report.resources.length);
+    const list = byId("installed-groups");
     list.replaceChildren();
     if (filtered.length === 0) {
-      list.append(element("div", "list-empty", state.report.resources.length === 0 ? "No local resources were discovered. The provider coverage above shows what was checked." : "No resources match these filters."));
+      list.append(element("div", "list-empty", state.report.resources.length === 0 ? "No local resources were discovered. The overview shows what was checked." : "No resources match these filters."));
       return;
     }
 
-    const elsewhereLabel = "Elsewhere in repository";
-    const groups = new Map();
-    for (const resource of filtered) {
-      const key = !inContext(resource)
-        ? elsewhereLabel
-        : resource.owner.type === "plugin" ? "Plugin: " + (resource.owner.id || "unknown") : "Standalone resources";
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(resource);
-    }
-    if (groups.has(elsewhereLabel)) {
-      const elsewhere = groups.get(elsewhereLabel);
-      groups.delete(elsewhereLabel);
-      groups.set(elsewhereLabel, elsewhere);
-    }
+    const groups = new Map(groupOrder.map((label) => [label, []]));
+    for (const resource of filtered) groups.get(groupFor(resource)).push(resource);
     for (const [label, resources] of groups) {
-      const group = element("section", "inventory-group");
-      const heading = element("div", "inventory-group-heading");
-      heading.append(element("span", "", label), element("span", "", resources.length));
+      if (resources.length === 0) continue;
+      const group = element("details", "inventory-group");
+      group.open = state.openGroups.has(label);
+      group.addEventListener("toggle", () => {
+        if (group.open) state.openGroups.add(label); else state.openGroups.delete(label);
+      });
+      const heading = element("summary", "inventory-group-heading");
+      heading.append(element("span", "", label), element("span", "", plural(resources.length, "resource")));
       group.append(heading);
       for (const resource of resources) group.append(resourceRow(resource));
       list.append(group);
@@ -634,45 +757,130 @@ export const dashboardClientScript = String.raw`
       element("span", "resource-name", resource.name),
       element("span", "resource-provider", providerLabel(resource.provider)),
       element("span", "resource-kind", resource.kind),
-      element("span", "resource-scope", resource.scope),
       element("span", "resource-path", resource.displayPath || "No file path"),
-      statusBadge(inContext(resource) ? resource.state : "elsewhere"),
+      statusBadge(operatorStatus(resource, decisionFor(resource))),
     );
     row.addEventListener("click", () => selectResource(resource.id));
     return row;
   }
 
+  function effectiveRow(resource, decision, order) {
+    const row = element("div", "effective-row");
+    row.append(element("span", "effective-order", order === undefined ? "" : String(order)));
+    const name = element("button", "effective-name", resource.name);
+    name.type = "button";
+    name.addEventListener("click", () => selectResource(resource.id));
+    const reason = decision ? decision.reason : "Found outside the selected directory's ancestor chain.";
+    row.append(name, statusBadge(operatorStatus(resource, decision)), element("span", "effective-reason", reason));
+    return row;
+  }
+
+  function fillEffectiveSection(listId, countId, rows, emptyText) {
+    const list = byId(listId);
+    list.replaceChildren();
+    byId(countId).textContent = plural(rows.length, "resource");
+    if (rows.length === 0) {
+      list.append(element("div", "list-empty", emptyText));
+      return;
+    }
+    for (const row of rows) list.append(row);
+  }
+
   function renderEffective() {
     const select = byId("effective-provider");
-    const selectedProvider = select.value || state.report.providers[0]?.provider;
+    const selectedProvider = select.value || (state.report.providers[0] && state.report.providers[0].provider);
     const effective = state.report.effective[selectedProvider];
-    const list = byId("effective-list");
-    list.replaceChildren();
-    if (!effective) {
-      byId("effective-summary").textContent = "No effective model is available for this provider.";
-      list.append(element("div", "list-empty", "This adapter did not return an effective configuration."));
+    const label = providerLabel(selectedProvider);
+    const provider = state.report.providers.find((item) => item.provider === selectedProvider);
+    const elsewhere = state.report.resources.filter((resource) => resource.provider === selectedProvider && !inContext(resource));
+    const elsewhereGroup = byId("effective-elsewhere");
+    elsewhereGroup.hidden = elsewhere.length === 0;
+    byId("effective-elsewhere-count").textContent = plural(elsewhere.length, "resource");
+    const elsewhereList = byId("effective-elsewhere-list");
+    elsewhereList.replaceChildren();
+    for (const resource of elsewhere) elsewhereList.append(effectiveRow(resource, undefined));
+
+    if (!effective || !provider || provider.support !== "supported") {
+      byId("effective-summary").textContent = provider && provider.installed
+        ? label + " " + provider.version + " is installed but not supported, so nothing was resolved for it."
+        : label + " is not detected on this machine, so nothing was resolved for it.";
+      fillEffectiveSection("effective-instructions", "effective-instructions-count", [], "No instructions were resolved.");
+      fillEffectiveSection("effective-skills", "effective-skills-count", [], "No skills were resolved.");
+      fillEffectiveSection("effective-integrations", "effective-integrations-count", [], "No integrations were resolved.");
+      fillEffectiveSection("effective-other", "effective-other-count", [], "Nothing else was evaluated.");
       return;
     }
+
     const decisionById = new Map(effective.decisions.map((decision) => [decision.resourceId, decision]));
-    const ordered = effective.orderedResourceIds.map((id) => decisionById.get(id)).filter(Boolean);
-    const remaining = effective.decisions.filter((decision) => !effective.orderedResourceIds.includes(decision.resourceId));
-    byId("effective-summary").textContent = plural(ordered.length, "active resource") + " in load order, " + plural(remaining.length, "other decision");
-    const decisions = [...ordered, ...remaining];
-    if (decisions.length === 0) {
-      list.append(element("div", "list-empty", "No resources are effective for this provider and working directory."));
-      return;
-    }
-    decisions.forEach((decision, index) => {
-      const resource = resourceById(decision.resourceId);
-      if (!resource) return;
-      const row = element("div", "effective-row");
-      row.append(element("span", "effective-order", decision.order === undefined ? "" : String(decision.order + 1)));
-      const name = element("button", "effective-name", resource.name);
-      name.type = "button";
-      name.addEventListener("click", () => selectResource(resource.id));
-      row.append(name, statusBadge(decision.state), element("span", "effective-reason", decision.reason));
-      list.append(row);
+    const instructions = [];
+    effective.orderedResourceIds.forEach((id, index) => {
+      const resource = resourceById(id);
+      const decision = decisionById.get(id);
+      if (resource && decision && resource.kind === "instruction" && decision.state === "active") {
+        instructions.push(effectiveRow(resource, decision, index + 1));
+      }
     });
+    const skills = [];
+    const integrations = [];
+    const other = [];
+    for (const decision of effective.decisions) {
+      const resource = resourceById(decision.resourceId);
+      if (!resource) continue;
+      if (decision.state === "active" && resource.kind === "skill") skills.push(effectiveRow(resource, decision));
+      else if (decision.state === "active" && (resource.kind === "mcp" || resource.kind === "plugin")) integrations.push(effectiveRow(resource, decision));
+      else if (decision.state !== "active" || resource.kind !== "instruction") other.push(effectiveRow(resource, decision));
+    }
+    byId("effective-summary").textContent = label + " loads " + plural(instructions.length, "instruction file") + ", can call on " + plural(skills.length, "skill") + ", and has " + plural(integrations.length, "integration") + " enabled for this directory.";
+    fillEffectiveSection("effective-instructions", "effective-instructions-count", instructions, "No instruction files load for this directory.");
+    fillEffectiveSection("effective-skills", "effective-skills-count", skills, "No skills are available on demand.");
+    fillEffectiveSection("effective-integrations", "effective-integrations-count", integrations, "No MCP servers or plugins are enabled.");
+    fillEffectiveSection("effective-other", "effective-other-count", other, "Every discovered resource for this directory is in use.");
+  }
+
+  function findingOwnerLabel(finding, resource) {
+    if (resource) return ownerLabel(resource);
+    if (finding.owner === "provider" || !finding.owner) return "Provider-managed" + " (" + providerLabel(finding.provider) + ")";
+    return finding.owner;
+  }
+
+  function factRow(label, value) {
+    const row = element("div");
+    const dd = element("dd");
+    if (value instanceof Node) dd.append(value); else dd.textContent = value;
+    row.append(element("dt", "", label), dd);
+    return row;
+  }
+
+  function findingCard(finding) {
+    const resource = finding.resourceId ? resourceById(finding.resourceId) : null;
+    const card = element("article", "finding-card");
+    const head = element("div", "finding-head");
+    head.append(badge(finding.severity), element("h3", "finding-title", finding.title || finding.message));
+    card.append(head);
+
+    const facts = element("dl", "finding-facts");
+    facts.append(factRow("Impact", finding.impact || "Not classified."));
+    facts.append(factRow("Owner", findingOwnerLabel(finding, resource)));
+    const source = element("button", "finding-source", resource ? (resource.displayPath || resource.name) : providerLabel(finding.provider) + " (no single file)");
+    source.type = "button";
+    source.disabled = !resource;
+    if (resource) source.addEventListener("click", () => selectResource(resource.id));
+    facts.append(factRow("File", source));
+    facts.append(factRow("Action", finding.remediation || "No guidance is available for this rule yet."));
+    card.append(facts);
+
+    const technical = element("details", "finding-technical");
+    technical.append(element("summary", "", "Technical details"));
+    const details = element("dl");
+    details.append(
+      factRow("Rule", finding.code),
+      factRow("Confidence", finding.confidence),
+      factRow("Evidence", finding.evidence || finding.message),
+      factRow("Message", finding.message),
+    );
+    technical.append(details);
+    card.append(technical);
+    return card;
   }
 
   function renderFindingsInto(container, findings) {
@@ -680,43 +888,32 @@ export const dashboardClientScript = String.raw`
       container.append(element("div", "list-empty", "No findings in this view."));
       return;
     }
-    for (const finding of findings) {
-      const row = element("div", "finding-row");
-      row.append(
-        statusBadge(finding.severity),
-        element("span", "finding-confidence", finding.confidence + " confidence"),
-        element("span", "finding-code", finding.code),
-        element("span", "finding-message", finding.message),
-      );
-      const resource = finding.resourceId ? resourceById(finding.resourceId) : null;
-      const sourceLabel = resource
-        ? providerLabel(finding.provider) + " | " + (resource.displayPath || resource.name)
-        : providerLabel(finding.provider);
-      const source = element("button", "finding-source", sourceLabel);
-      source.type = "button";
-      source.disabled = !resource;
-      if (resource) source.addEventListener("click", () => selectResource(resource.id));
-      row.append(source);
-      container.append(row);
-    }
+    for (const finding of findings) container.append(findingCard(finding));
+  }
+
+  function fillCollapsedFindings(groupId, listId, countId, findings) {
+    const group = byId(groupId);
+    group.hidden = findings.length === 0;
+    byId(countId).textContent = plural(findings.length, "finding");
+    const list = byId(listId);
+    list.replaceChildren();
+    if (findings.length > 0) renderFindingsInto(list, findings);
   }
 
   function renderFindings() {
-    const severityOrder = { error: 0, warning: 1, info: 2 };
-    const bySeverity = (left, right) => severityOrder[left.severity] - severityOrder[right.severity] || left.code.localeCompare(right.code);
-    const findings = contextFindings().sort(bySeverity);
-    const elsewhere = state.report.findings.filter((finding) => !inContext(finding)).sort(bySeverity);
-    byId("finding-count").textContent = plural(findings.length, "finding") + (elsewhere.length > 0 ? " (" + elsewhere.length + " more elsewhere in repository)" : "");
-    const list = byId("finding-list");
+    const actionable = sortFindings(state.report.findings.filter(isActionable));
+    const reference = sortFindings(state.report.findings.filter((finding) => inContext(finding) && !isActionable(finding)));
+    const elsewhere = sortFindings(state.report.findings.filter((finding) => !inContext(finding)));
+    byId("finding-count").textContent = plural(actionable.length, "finding") + " to fix, " + plural(reference.length, "note") + " for reference" + (elsewhere.length > 0 ? ", " + elsewhere.length + " elsewhere in repository" : "");
+    const list = byId("findings-actionable");
     list.replaceChildren();
-    renderFindingsInto(list, findings);
-    if (elsewhere.length === 0) return;
-    const group = element("details", "finding-group");
-    const heading = element("summary", "inventory-group-heading");
-    heading.append(element("span", "", "Elsewhere in repository"), element("span", "", elsewhere.length));
-    group.append(heading);
-    renderFindingsInto(group, elsewhere);
-    list.append(group);
+    if (actionable.length === 0) {
+      list.append(element("div", "list-empty", "Nothing in the files you control needs a fix for this directory."));
+    } else {
+      renderFindingsInto(list, actionable);
+    }
+    fillCollapsedFindings("findings-reference", "findings-reference-list", "findings-reference-count", reference);
+    fillCollapsedFindings("findings-elsewhere", "findings-elsewhere-list", "findings-elsewhere-count", elsewhere);
   }
 
   function detailPair(label, value) {
@@ -727,10 +924,14 @@ export const dashboardClientScript = String.raw`
 
   function selectResource(resourceId) {
     state.selectedResourceId = resourceId;
-    byId("detail-nav").disabled = false;
+    byId("detail-nav").hidden = false;
     renderDetail();
     renderInventory();
     switchView("detail");
+  }
+
+  function loadModeLabel(resource) {
+    return ({ "context-loaded": "Loaded into context", "on-demand": "Available on demand", "explicitly-enabled": "Runs only when enabled" })[resource.loadMode] || "Unknown";
   }
 
   function renderDetail() {
@@ -740,31 +941,48 @@ export const dashboardClientScript = String.raw`
     byId("detail-subtitle").textContent = providerLabel(resource.provider) + " " + resource.kind + " at " + (resource.displayPath || "a non-file source");
     byId("detail-empty").hidden = true;
     byId("detail-content").hidden = false;
+
+    const decision = decisionFor(resource);
+    const status = operatorStatus(resource, decision);
+    const effective = byId("detail-effective");
+    const panel = element("div", "effective-detail");
+    const head = element("div", "effective-detail-head");
+    head.append(statusBadge(status), element("strong", "", status.label + " for " + providerLabel(resource.provider) + " in " + state.report.subject.workingDirectory));
+    panel.append(head);
+    panel.append(element("p", "", decision
+      ? decision.reason + (decision.order === undefined ? "" : " Position " + (decision.order + 1) + " in the load order.")
+      : inContext(resource)
+        ? "This resource was not part of the effective configuration for this directory."
+        : "Found in the repository outside the selected directory's ancestor chain, so it is never loaded here."));
+    panel.append(element("p", "", loadModeLabel(resource) + ". Controlled by " + ownerLabel(resource).toLowerCase().replace(/^you/, "you") + "."));
+    effective.replaceChildren(panel);
+
+    const validation = byId("detail-validation");
+    validation.replaceChildren();
+    const findings = sortFindings(state.report.findings.filter((finding) => finding.resourceId === resource.id));
+    if (findings.length === 0) {
+      validation.append(element("div", "list-empty", "No findings for this resource."));
+    } else {
+      renderFindingsInto(validation, findings);
+    }
+
     const metadata = byId("detail-metadata");
     metadata.replaceChildren(
       detailPair("Provider", providerLabel(resource.provider) + " " + resource.providerVersion),
       detailPair("Kind", resource.kind),
       detailPair("Scope", resource.scope),
-      detailPair("Reach", inContext(resource) ? "In the selected context chain" : "Elsewhere in repository"),
-      detailPair("Load mode", resource.loadMode || "unknown"),
-      detailPair("State", resource.state),
-      detailPair("Origin", resource.origin),
       detailPair("Owner", ownerLabel(resource)),
+      detailPair("Origin", resource.origin),
+      detailPair("Reach", inContext(resource) ? "In the selected directory's ancestor chain" : "Elsewhere in repository"),
+      detailPair("Load mode", loadModeLabel(resource)),
+      detailPair("Raw state", resource.state),
       detailPair("Evidence", resource.evidenceType + ": " + resource.evidenceReceipt),
       detailPair("Source", resource.displayPath || "Not file-backed"),
     );
-    const effective = byId("detail-effective");
-    effective.replaceChildren();
-    for (const provider of state.report.providers) {
-      const decision = state.report.effective[provider.provider]?.decisions.find((item) => item.resourceId === resource.id);
-      const row = element("div", "effective-detail-row");
-      row.append(element("span", "", providerLabel(provider.provider)), element("span", "", decision ? decision.state + ": " + decision.reason : "Not applicable"));
-      effective.append(row);
-    }
     byId("detail-preview").textContent = JSON.stringify({ precedence: resource.precedence, capabilities: resource.capabilities, metadata: resource.metadata }, null, 2);
-    const findings = byId("detail-findings");
-    findings.replaceChildren();
-    renderFindingsInto(findings, state.report.findings.filter((finding) => finding.resourceId === resource.id));
+    byId("detail-raw-json").textContent = JSON.stringify(resource, null, 2);
+    byId("detail-provider-data").open = false;
+    byId("detail-raw").open = false;
 
     const actionable = state.options.actionableResourceIds.includes(resource.id);
     byId("resource-actions").hidden = !actionable;
@@ -807,10 +1025,10 @@ export const dashboardClientScript = String.raw`
     }
   }
 
-  document.querySelectorAll("[data-view]").forEach((button) => {
-    button.addEventListener("click", (event) => {
+  document.querySelectorAll("[data-view]").forEach((item) => {
+    item.addEventListener("click", (event) => {
       event.preventDefault();
-      switchView(button.dataset.view);
+      switchView(item.dataset.view);
     });
   });
   ["inventory-search", "provider-filter", "kind-filter", "state-filter"].forEach((id) => {
@@ -827,7 +1045,7 @@ export const dashboardClientScript = String.raw`
       state.options = options;
       renderAll();
       const requestedView = location.hash.slice(1);
-      switchView(["overview", "installed", "effective", "findings"].includes(requestedView) ? requestedView : "overview");
+      switchView(views.includes(requestedView) ? requestedView : "overview");
     })
     .catch(showError);
 })();

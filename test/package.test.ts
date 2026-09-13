@@ -39,6 +39,7 @@ const expectedPackedFiles = [
   "dist/cli.js",
   "dist/core/coordinator.js",
   "dist/core/provider-adapter.js",
+  "dist/core/rules.js",
   "dist/core/runtime.js",
   "dist/core/scanner.js",
   "dist/core/schema.js",
@@ -296,7 +297,7 @@ async function smokeDashboard(
 
   const page = await fetch(url);
   assert.equal(page.status, 200);
-  assert.match(await page.text(), /Installed inventory/);
+  assert.match(await page.text(), /What configuration exists\?/);
   assert.equal(stderr, "");
   if (expectDoctorSummary) {
     assert.match(stdout, /Providers: 1 detected, 4 unavailable/);

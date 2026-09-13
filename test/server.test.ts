@@ -95,7 +95,7 @@ test("protects local data with a per-process credential and restrictive headers"
   assert.equal(page.headers.has("access-control-allow-origin"), false);
   const pageBody = await page.text();
   assert.equal(pageBody.includes(first.credential), false);
-  assert.match(pageBody, /Installed inventory/);
+  assert.match(pageBody, /What configuration exists\?/);
 
   const stylesheet = await fetch(`${first.origin}/assets/dashboard.css`);
   const clientScript = await fetch(`${first.origin}/assets/dashboard.js`);

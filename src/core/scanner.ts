@@ -2,6 +2,7 @@ import { SCHEMA_VERSION } from "./schema.ts";
 import path from "node:path";
 
 import type { ProviderAdapter, ScanContext } from "./provider-adapter.ts";
+import { describeFindings } from "./rules.ts";
 import type {
   EffectiveConfiguration,
   Finding,
@@ -23,17 +24,26 @@ export async function scanProvider(
   const effective = normalizeEffective(
     await adapter.resolveEffective(context, discovery.resources, detection),
   );
-  const findings = [
-    ...detectionFindings(detection),
-    ...scopeFindings(
-      await adapter.validate(context, effective.resources),
-      effective.resources,
-    ),
-  ];
+  const findings = describeFindings(
+    [
+      ...detectionFindings(detection),
+      ...scopeFindings(
+        await adapter.validate(context, effective.resources),
+        effective.resources,
+      ),
+    ],
+    effective.resources,
+  );
 
   return {
     detection,
-    effective,
+    effective: {
+      ...effective,
+      resources: effective.resources.map((resource) => ({
+        ...resource,
+        findings: describeFindings(resource.findings, effective.resources),
+      })),
+    },
     findings,
     notices: discovery.notices,
   };

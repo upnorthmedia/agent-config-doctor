@@ -56,6 +56,9 @@ export interface ResourceOwner {
   id?: string;
 }
 
+/** Who controls the file a finding is about; mirrors `ResourceOwner.type`. */
+export type FindingOwner = ResourceOwner["type"];
+
 export interface Finding {
   code: string;
   severity: FindingSeverity;
@@ -68,6 +71,18 @@ export interface Finding {
    * severity but are left out of every default total.
    */
   reach?: ResourceReach;
+  /** Operator-facing headline from the rule catalog. */
+  title?: string;
+  /** What the problem changes for the provider, in plain language. */
+  impact?: string;
+  /** Who controls the file the finding is about. */
+  owner?: FindingOwner;
+  /** What to do about it, addressed to the person who controls the file. */
+  remediation?: string;
+  /** The concrete evidence behind the finding. */
+  evidence?: string;
+  /** True only when the user controls the file and can act on the finding. */
+  actionable?: boolean;
 }
 
 /**
