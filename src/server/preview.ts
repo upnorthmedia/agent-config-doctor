@@ -35,7 +35,14 @@ export async function readPreview(target: PreviewTarget): Promise<ResourcePrevie
       target.canonicalPath,
       constants.O_RDONLY | constants.O_NOFOLLOW,
     );
-  } catch {
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "EACCES" || code === "EPERM") {
+      throw new ActionError(
+        "preview_unreadable",
+        "The discovered resource cannot be read with the current permissions.",
+      );
+    }
     throw new ActionError(
       "resource_missing",
       "The discovered resource no longer exists.",

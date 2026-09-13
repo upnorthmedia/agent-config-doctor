@@ -1111,11 +1111,13 @@ export const dashboardClientScript = String.raw`
         const code = error instanceof ApiError ? error.code : "";
         const message = code === "resource_replaced" || code === "resource_missing"
           ? "The file changed or disappeared after the scan, so it is not previewed. Relaunch Agent Config Doctor to rescan."
-          : code === "preview_too_large"
-            ? "This file is larger than 1 MiB and is not previewed. Open it in an editor instead."
-            : code === "preview_not_text"
-              ? "This file is not UTF-8 text, so no preview is shown."
-              : error instanceof Error ? error.message : "The preview could not be loaded.";
+          : code === "preview_unreadable"
+            ? "This file is blocked: the current user has no permission to read it, so it is not previewed. Check the file permissions and relaunch."
+            : code === "preview_too_large"
+              ? "This file is larger than 1 MiB and is not previewed. Open it in an editor instead."
+              : code === "preview_not_text"
+                ? "This file is not UTF-8 text, so no preview is shown."
+                : error instanceof Error ? error.message : "The preview could not be loaded.";
         setPreviewStatus(message, true);
         if (error instanceof ApiError && error.status === 401) showError(error);
       });

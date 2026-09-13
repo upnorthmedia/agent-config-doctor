@@ -354,3 +354,37 @@ test("a provider home inside the scanned repository yields one record per resour
   assert.equal(decision?.state, "active");
   assert.equal(decision?.order, 0);
 });
+
+test("deduping decisions keeps the adapter's decision order", async () => {
+  // Same fixture as above: the home AGENTS.md is decided twice. Only the
+  // duplicate goes away; every other decision stays where the adapter put it
+  // rather than being regrouped active-first.
+  const context: ScanContext = {
+    homeDirectory: path.join(codexFixture, "home"),
+    repositoryPath: codexFixture,
+    workingDirectory: path.join(codexFixture, "repo", "packages", "api", "src"),
+    environment: { CODEX_HOME: path.join(codexFixture, "home", ".codex") },
+    executables: { codex: path.join(codexFixture, "bin", "codex") },
+  };
+  const adapter = new CodexAdapter();
+  const detection = await adapter.detect(context);
+  const discovery = await adapter.discover(context, detection);
+  const raw = await adapter.resolveEffective(context, discovery.resources, detection);
+  const snapshot = await scanProvider(new CodexAdapter(), context);
+
+  const normalized = snapshot.effective.decisions;
+  const kept = new Set(normalized.map((decision) => decision.resourceId));
+  const seen = new Set<string>();
+  const expectedIds = raw.decisions
+    .map((decision) => decision.resourceId)
+    .filter((id) => kept.has(id) && !seen.has(id) && Boolean(seen.add(id)));
+  assert.ok(raw.decisions.length > normalized.length, "the fixture produces duplicate decisions");
+
+  const states = normalized.map((decision) => decision.state === "active");
+  const firstInactive = states.indexOf(false);
+  assert.ok(
+    firstInactive !== -1 && states.slice(firstInactive).includes(true),
+    "the fixture interleaves inactive and active decisions",
+  );
+  assert.deepEqual(normalized.map((decision) => decision.resourceId), expectedIds);
+});

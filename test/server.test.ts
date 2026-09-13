@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import {
+  chmod,
   mkdir,
   mkdtemp,
   readFile,
@@ -386,6 +387,25 @@ test("refuses previews of forged IDs, configuration files, and files that change
   assert.equal((await missing.json() as { error: string }).error, "resource_missing");
 });
 
+test("reports a file that lost read permission after the scan as blocked, not missing", {
+  skip: process.platform === "win32" || process.getuid?.() === 0
+    ? "file permissions are not enforced for this user or platform"
+    : false,
+}, async (t) => {
+  const { instructionPath, resourceId, scan } = await createScanFixture(t);
+  const server = await startDashboardServer({ initialScan: scan, port: 0 });
+  t.after(() => server.close());
+  await chmod(instructionPath, 0o000);
+
+  const response = await fetch(`${server.origin}/api/resources/${resourceId}/preview`, {
+    headers: { Authorization: `Bearer ${server.credential}` },
+  });
+  assert.equal(response.status, 409);
+  const body = await response.json() as { error: string; message: string };
+  assert.equal(body.error, "preview_unreadable");
+  assert.match(body.message, /cannot be read/);
+});
+
 test("refuses a preview through a symlink swapped to point outside the approved roots", async (t) => {
   const { instructionPath, outsideRoot, resourceId, scan } = await createScanFixture(t, { symlinked: true });
   const server = await startDashboardServer({ initialScan: scan, port: 0 });
@@ -432,17 +452,20 @@ test("refuses binary and non-UTF-8 previews and reports empty, truncated, and ov
       },
     },
     {
+      // 40 three-byte characters plus a newline make 121-byte lines, and
+      // 262144 mod 121 is 58, which lands one byte into the twentieth
+      // character. The read must back up to the previous character boundary.
       name: "truncated",
-      content: Buffer.from(("é".repeat(60) + "\n").repeat(3000), "utf8"),
+      content: Buffer.from(("€".repeat(40) + "\n").repeat(3000), "utf8"),
       expect: async (response) => {
         assert.equal(response.status, 200);
         const body = await response.json() as { content: string; truncated: boolean; readBytes: number; size: number };
         assert.equal(body.truncated, true);
-        assert.ok(body.readBytes <= 256 * 1024);
-        assert.ok(body.readBytes > 256 * 1024 - 4);
+        assert.equal(body.readBytes, 256 * 1024 - 1);
         assert.equal(Buffer.byteLength(body.content), body.readBytes);
         assert.equal(body.size, 3000 * 121);
         assert.equal(body.content.includes("\uFFFD"), false);
+        assert.equal(body.content.endsWith("€"), true);
       },
     },
     {

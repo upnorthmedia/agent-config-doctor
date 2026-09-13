@@ -65,7 +65,8 @@ export class ActionError extends Error {
     | "launch_failed"
     | "preview_unavailable"
     | "preview_too_large"
-    | "preview_not_text";
+    | "preview_not_text"
+    | "preview_unreadable";
 
   constructor(
     code:
@@ -77,7 +78,8 @@ export class ActionError extends Error {
       | "launch_failed"
       | "preview_unavailable"
       | "preview_too_large"
-      | "preview_not_text",
+      | "preview_not_text"
+      | "preview_unreadable",
     message: string,
   ) {
     super(message);

@@ -91,7 +91,6 @@ function normalizeEffective(
   );
 
   const seenOrdered = new Set<string>();
-  const seenDecisions = new Set<string>();
 
   return {
     ...effective,
@@ -103,13 +102,9 @@ function normalizeEffective(
       seenOrdered.add(id);
       return true;
     }),
-    decisions: preferActive(effective.decisions).filter((decision) => {
-      if (offChain.has(decision.resourceId) || seenDecisions.has(decision.resourceId)) {
-        return false;
-      }
-      seenDecisions.add(decision.resourceId);
-      return true;
-    }),
+    decisions: dedupeDecisions(effective.decisions).filter(
+      (decision) => !offChain.has(decision.resourceId),
+    ),
   };
 }
 
@@ -137,11 +132,23 @@ function rank(resource: ResourceRecord): number {
   );
 }
 
-/** Orders decisions so that an active decision for an ID wins the dedupe. */
-function preferActive(decisions: EffectiveResource[]): EffectiveResource[] {
-  return [...decisions].sort(
-    (left, right) =>
-      Number(right.state === "active") - Number(left.state === "active"),
+/**
+ * One decision per resource ID, keeping the adapter's order. When the same ID
+ * was decided twice the active decision wins, otherwise the first seen.
+ */
+function dedupeDecisions(decisions: EffectiveResource[]): EffectiveResource[] {
+  const byId = new Map<string, EffectiveResource>();
+  for (const decision of decisions) {
+    const existing = byId.get(decision.resourceId);
+    if (
+      !existing ||
+      (decision.state === "active" && existing.state !== "active")
+    ) {
+      byId.set(decision.resourceId, decision);
+    }
+  }
+  return decisions.filter(
+    (decision) => byId.get(decision.resourceId) === decision,
   );
 }
 
