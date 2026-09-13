@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { scanProviders } from "../src/core/coordinator.ts";
 import type { ScanContext } from "../src/core/provider-adapter.ts";
-import { scanProvider } from "../src/core/scanner.ts";
+import { createScanReport, scanProvider } from "../src/core/scanner.ts";
 import { ClaudeAdapter } from "../src/providers/claude.ts";
 import { CodexAdapter } from "../src/providers/codex.ts";
 import { GrokAdapter } from "../src/providers/grok.ts";
@@ -313,4 +313,44 @@ test("discovers Codex system skills as provider-owned resources", async () => {
   assert.deepEqual(systemSkill.owner, { type: "provider", id: "codex" });
   assert.equal(systemSkill.state, "active");
   assert.equal(systemSkill.reach, "chain");
+});
+
+test("a provider home inside the scanned repository yields one record per resource ID", async () => {
+  // The fixture home lives under the fixture root, so the user-level
+  // AGENTS.md is discovered twice: once from CODEX_HOME and once from the
+  // repository walk. Opaque IDs must still map to exactly one record, one
+  // decision, and one set of findings, and the in-chain copy must win.
+  const context: ScanContext = {
+    homeDirectory: path.join(codexFixture, "home"),
+    repositoryPath: codexFixture,
+    workingDirectory: path.join(codexFixture, "repo", "packages", "api", "src"),
+    environment: { CODEX_HOME: path.join(codexFixture, "home", ".codex") },
+    executables: { codex: path.join(codexFixture, "bin", "codex") },
+  };
+  const snapshot = await scanProvider(new CodexAdapter(), context);
+  const report = createScanReport(snapshot, context);
+
+  const ids = report.resources.map((resource) => resource.id);
+  assert.equal(new Set(ids).size, ids.length, "resource IDs are unique");
+  const decisionIds = report.effective.decisions.map((decision) => decision.resourceId);
+  assert.equal(new Set(decisionIds).size, decisionIds.length, "decisions are unique");
+  assert.equal(
+    new Set(report.effective.orderedResourceIds).size,
+    report.effective.orderedResourceIds.length,
+  );
+  const findingKeys = report.findings.map((finding) => `${finding.code}:${finding.resourceId}:${finding.message}`);
+  assert.equal(new Set(findingKeys).size, findingKeys.length, "findings are unique");
+
+  const homeInstruction = report.resources.filter(
+    (resource) => resource.displayPath === "$CODEX_HOME/AGENTS.md",
+  );
+  assert.equal(homeInstruction.length, 1);
+  assert.equal(homeInstruction[0]?.state, "active");
+  assert.equal(homeInstruction[0]?.reach, "chain");
+  assert.equal(report.effective.orderedResourceIds[0], homeInstruction[0]?.id);
+  const decision = report.effective.decisions.find(
+    (item) => item.resourceId === homeInstruction[0]?.id,
+  );
+  assert.equal(decision?.state, "active");
+  assert.equal(decision?.order, 0);
 });

@@ -5,6 +5,7 @@ import type { ProviderAdapter, ScanContext } from "./provider-adapter.ts";
 import { describeFindings } from "./rules.ts";
 import type {
   EffectiveConfiguration,
+  EffectiveResource,
   Finding,
   JsonValue,
   PublicResourceRecord,
@@ -66,7 +67,7 @@ const defaultLoadModes: Partial<Record<ResourceKind, ResourceLoadMode>> = {
 function normalizeEffective(
   effective: EffectiveConfiguration,
 ): EffectiveConfiguration {
-  const resources = effective.resources.map((resource) => {
+  const resources = dedupeResources(effective.resources).map((resource) => {
     const reach = resource.reach ?? "chain";
     const loadMode = resource.loadMode ?? defaultLoadModes[resource.kind];
     return {
@@ -89,16 +90,59 @@ function normalizeEffective(
       .map((resource) => resource.id),
   );
 
+  const seenOrdered = new Set<string>();
+  const seenDecisions = new Set<string>();
+
   return {
     ...effective,
     resources,
-    orderedResourceIds: effective.orderedResourceIds.filter(
-      (id) => !offChain.has(id),
-    ),
-    decisions: effective.decisions.filter(
-      (decision) => !offChain.has(decision.resourceId),
-    ),
+    orderedResourceIds: effective.orderedResourceIds.filter((id) => {
+      if (offChain.has(id) || seenOrdered.has(id)) {
+        return false;
+      }
+      seenOrdered.add(id);
+      return true;
+    }),
+    decisions: preferActive(effective.decisions).filter((decision) => {
+      if (offChain.has(decision.resourceId) || seenDecisions.has(decision.resourceId)) {
+        return false;
+      }
+      seenDecisions.add(decision.resourceId);
+      return true;
+    }),
   };
+}
+
+/**
+ * An opaque ID must name exactly one record. The same file can be discovered
+ * twice when a provider home lives inside the scanned repository (once from
+ * the home, once from the repository walk); keep the copy that is in the
+ * ancestor chain, then the active one, then the first seen.
+ */
+function dedupeResources(resources: ResourceRecord[]): ResourceRecord[] {
+  const byId = new Map<string, ResourceRecord>();
+  for (const resource of resources) {
+    const existing = byId.get(resource.id);
+    if (!existing || rank(resource) > rank(existing)) {
+      byId.set(resource.id, resource);
+    }
+  }
+  return resources.filter((resource) => byId.get(resource.id) === resource);
+}
+
+function rank(resource: ResourceRecord): number {
+  return (
+    (resource.reach !== "repository" ? 2 : 0) +
+    (resource.state === "active" ? 1 : 0)
+  );
+}
+
+/** Orders decisions so that an active decision for an ID wins the dedupe. */
+function preferActive(decisions: EffectiveResource[]): EffectiveResource[] {
+  return [...decisions].sort(
+    (left, right) =>
+      Number(right.state === "active") - Number(left.state === "active"),
+  );
 }
 
 /**
