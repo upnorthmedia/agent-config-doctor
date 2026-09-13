@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-The latest published `1.0.x` version receives security fixes. Source snapshots, older minor versions, and prerelease versions are not supported unless this policy is updated.
+The latest published `1.1.x` version receives security fixes. Source snapshots, older minor versions, and prerelease versions are not supported unless this policy is updated.
 
 ## Report a vulnerability
 
@@ -26,7 +26,8 @@ Security reports are especially useful for:
 - Dashboard access outside the intended loopback and session boundary
 - Cross-origin action requests
 - Forged resource IDs or filesystem boundary bypasses
-- Symlink or file-replacement races in open and reveal actions
+- Symlink or file-replacement races in open, reveal, and preview actions
+- Preview reads outside the approved roots, of configuration files, or beyond the documented size and encoding bounds
 - Shell execution or execution of configured MCP commands
 
 Agent Config Doctor is a local inspection tool. A process that already runs as the same operating-system user may have direct access to the same files and is outside the dashboard's isolation boundary.

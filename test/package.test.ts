@@ -39,9 +39,11 @@ const expectedPackedFiles = [
   "dist/cli.js",
   "dist/core/coordinator.js",
   "dist/core/provider-adapter.js",
+  "dist/core/rules.js",
   "dist/core/runtime.js",
   "dist/core/scanner.js",
   "dist/core/schema.js",
+  "dist/core/version.js",
   "dist/dashboard/dashboard.js",
   "dist/providers/claude.js",
   "dist/providers/codex.js",
@@ -53,6 +55,7 @@ const expectedPackedFiles = [
   "dist/providers/opencode.js",
   "dist/providers/shared.js",
   "dist/server/actions.js",
+  "dist/server/preview.js",
   "dist/server/server.js",
   "package.json",
 ].sort();
@@ -84,7 +87,7 @@ test("declares the approved public v1 package contract", async () => {
   ) as PackageMetadata;
 
   assert.equal(metadata.name, "agent-config-doctor");
-  assert.equal(metadata.version, "1.0.1");
+  assert.equal(metadata.version, "1.1.0");
   assert.equal(metadata.private, undefined);
   assert.equal(metadata.license, "MIT");
   assert.deepEqual(metadata.engines, { node: ">=24" });
@@ -169,7 +172,7 @@ test(
     const installedMetadata = JSON.parse(
       await readFile(path.join(installedPackageRoot, "package.json"), "utf8"),
     ) as PackageMetadata;
-    assert.equal(installedMetadata.version, "1.0.1");
+    assert.equal(installedMetadata.version, "1.1.0");
     await access(path.join(installRoot, "node_modules", "smol-toml", "package.json"));
     await access(path.join(installRoot, "node_modules", "yaml", "package.json"));
     await assert.rejects(
@@ -193,6 +196,8 @@ test(
     const help = run(binaryPath, ["--help"], installRoot, environment);
     assert.match(help, /^Agent Config Doctor\n/);
     assert.match(help, /agent-config-doctor scan \[path\] --json/);
+    const version = run(binaryPath, ["--version"], installRoot, environment);
+    assert.equal(version, `${installedMetadata.version}\n`);
 
     const scanOutput = run(
       binaryPath,
@@ -296,7 +301,7 @@ async function smokeDashboard(
 
   const page = await fetch(url);
   assert.equal(page.status, 200);
-  assert.match(await page.text(), /Installed inventory/);
+  assert.match(await page.text(), /What configuration exists\?/);
   assert.equal(stderr, "");
   if (expectDoctorSummary) {
     assert.match(stdout, /Providers: 1 detected, 4 unavailable/);

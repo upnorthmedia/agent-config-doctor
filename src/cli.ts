@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import type { CoordinatedScan } from "./core/coordinator.ts";
 import { scanPath } from "./core/runtime.ts";
 import { isInContext } from "./core/scanner.ts";
+import { packageVersion } from "./core/version.ts";
 import { detectGuiEditors, selectGuiEditor } from "./server/actions.ts";
 import { startDashboardServer } from "./server/server.ts";
 
@@ -22,6 +23,7 @@ Usage:
 
 Options:
   -h, --help       Show help
+  -v, --version    Print the package version and exit
   --no-open        Start the dashboard without opening a browser
   --editor <name>  Use a supported GUI editor
 `;
@@ -29,6 +31,10 @@ Options:
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (argv.includes("--help") || argv.includes("-h")) {
     process.stdout.write(help);
+    return 0;
+  }
+  if (argv.includes("--version") || argv.includes("-v")) {
+    process.stdout.write(`${packageVersion()}\n`);
     return 0;
   }
 

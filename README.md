@@ -42,9 +42,28 @@ node dist/cli.js /path/to/repository --no-open
 
 ```bash
 npx agent-config-doctor [path] [--no-open] [--editor <name>]
+npx agent-config-doctor --version
 ```
 
-`path` defaults to the current working directory and is the only working directory the dashboard scans. The dashboard contains overview, installed inventory, effective configuration, findings, and resource detail views. Search and filters operate on the current in-memory scan. To inspect a different directory, launch Agent Config Doctor again with that path.
+`path` defaults to the current working directory and is the only working directory the dashboard scans. `--version` (or `-v`) prints the package version and exits; the dashboard header shows the same version. To inspect a different directory, launch Agent Config Doctor again with that path.
+
+Each dashboard page answers one question and has its own URL, so reload restores the page and the browser's Back button returns to the previous one:
+
+| Route | Question | Contents |
+| --- | --- | --- |
+| `/` | Is my setup healthy here? | One summary per provider: loaded instructions, available skills, enabled integrations, actionable findings, and scan-completeness notices. |
+| `/installed` | What configuration exists? | Everything discovered, grouped as My configuration, Administrator configuration, Plugins, Provider-managed, and Elsewhere in repository. Plugins, provider-managed, and elsewhere groups start collapsed with their counts visible. Search and filters live in the URL query. |
+| `/effective` | What will this harness use in this directory? | Loaded instructions in precedence order, skills available on demand, enabled MCP servers and plugins, other decisions with plain reasons, and a collapsed section for unrelated repository resources. |
+| `/findings` | What should I fix? | Problems in files you control first, each with a title, impact, owner, file, and action. Rule codes, confidence, evidence, and the raw message sit under Technical details. Provider-managed notes and findings elsewhere in the repository are collapsed. |
+| `/resources/<id>` | What is this file and why does it matter? | A plain-text preview for instruction and skill files, the effective status, validation, copy, reveal, and open actions, metadata, then collapsed redacted provider data and raw JSON. |
+
+Status labels are written for operators: an instruction in the chain is "Loaded", a valid skill is "Available on demand", a configured MCP server or plugin is "Enabled", a file found outside the chain is "Elsewhere in repository", and a bad path or unreadable file is "Missing" or "Blocked". Scan failures are operational notices, never findings against your configuration, and never change the finding counts.
+
+### File previews
+
+The resource detail page shows the text of file-backed instruction and skill documents exactly as written on disk, with line numbers and wrapping, so you can see what an agent will read. Configuration files (MCP, plugin, and provider settings) are never previewed raw; they keep their structured, redacted metadata. Previews are bounded: files over 1 MiB are refused, at most the first 256 KiB is shown with an explicit truncation note, content must be UTF-8 text, binary content is refused, and empty files are reported as empty. Before reading, the server revalidates the opaque resource ID, opens the recorded canonical file without following a final symlink, and compares device and inode with the scan; a file that was replaced or redirected after the scan is refused.
+
+Preview text may contain sensitive material such as internal names, hostnames, or credentials. The page warns about this; review it before sharing a screenshot. Exported JSON stays redacted.
 
 `--editor` selects one detected GUI editor from `code`, `cursor`, `zed`, or `subl`. Agent Config Doctor never accepts an arbitrary editor command. If no supported editor is available, copy-path and reveal actions remain available.
 
@@ -96,7 +115,7 @@ Native listing commands (`claude plugin list --json`, `codex plugin list --json`
 
 ## JSON report
 
-Every report carries `schemaVersion: 1`. Version 1.0.1 adds optional fields only; existing fields keep their meaning.
+Every report carries `schemaVersion: 1`. Versions 1.0.1 and 1.1.0 add optional fields only; existing fields keep their meaning.
 
 | Field | Values | Meaning |
 | --- | --- | --- |
@@ -106,6 +125,12 @@ Every report carries `schemaVersion: 1`. Version 1.0.1 adds optional fields only
 | `resources[].owner.type` | `self`, `administrator`, `plugin`, `package`, `provider` | Who controls the file. `self` means the user. Codex marketplace plugins, Grok bundled skills, and Hermes bundled or protected skills are `provider` owned. |
 | `findings[].reach` | `repository` when present | The finding belongs to a resource found outside the selected directory's ancestor chain. It keeps its real severity but is left out of the overview and `doctor` totals, which report such findings separately as "elsewhere in repository". |
 | `providers[].complete` | boolean | `false` when a native inspection command for that provider failed. |
+| `findings[].title` | string | Operator-facing headline from the rule catalog (1.1.0). |
+| `findings[].impact` | string | What the problem changes for the provider, in plain language (1.1.0). |
+| `findings[].owner` | `self`, `administrator`, `plugin`, `package`, `provider` | Who controls the file the finding is about; `provider` for findings that have no resource (1.1.0). |
+| `findings[].remediation` | string | What to do, addressed to whoever controls the file (1.1.0). |
+| `findings[].evidence` | string | The concrete evidence behind the finding (1.1.0). |
+| `findings[].actionable` | boolean | `true` only when the user controls the file and can act on it. Provider, plugin, package, and administrator findings and generated copies are never actionable (1.1.0). |
 | `notices[]` | `{ code, provider, command, message, remediation }` | Operational scan notices such as `native.command.timeout`. |
 
 A display name that differs from its folder never invalidates a skill on its own. It is a medium-confidence warning when the user controls the skill and an informational finding when a provider, plugin, or package manages it.
@@ -124,6 +149,7 @@ Open-in-editor and reveal actions can launch a local application. The dashboard 
 - Scanning is limited to the selected repository, known provider configuration roots, and explicitly configured external skill locations.
 - Public reports omit canonical resource paths and replace known path roots with labels such as `$REPO`, `$HOME`, and `$CODEX_HOME`.
 - MCP environment values, arguments, credentials, URL user information, query strings, fragments, and static header values are not returned. Environment variable names, header names, command names, and sanitized URL hosts and paths can remain visible because they are diagnostic evidence.
+- Instruction and skill previews in the dashboard are shown unmodified; nothing in that text is masked, because masking could change the meaning of an instruction. Previews exist only inside the authenticated local session and are never part of the JSON report.
 - The dashboard keeps one scan in memory and writes no persistent database.
 
 Redaction is a safety boundary, not a guarantee that every user-authored name is harmless to share. Review JSON output before posting it publicly, especially when filenames, hostnames, command names, or environment variable names are sensitive.
@@ -134,7 +160,8 @@ Redaction is a safety boundary, not a guarantee that every user-authored name is
 - Every process gets an unpredictable session credential. The browser receives it in the URL fragment, stores it in session storage, and sends it as a bearer credential for protected API requests.
 - State-changing local actions require an exact same-origin request. The server does not enable permissive CORS.
 - The dashboard sends a restrictive Content Security Policy and renders scanned values as text.
-- File actions accept only current opaque IDs and revalidate the underlying target at action time.
+- File actions and previews accept only current opaque IDs and revalidate the underlying target at action time. Preview responses are sent with `Cache-Control: no-store`.
+- Only the page routes listed above are served; every other path is a 404. If a tab has no session credential (for example a URL pasted into a new tab), the dashboard asks you to relaunch and open the printed URL instead of falling back to a stored credential.
 - Supported editor commands are allowlisted. Arbitrary shell templates and terminal editors are not supported.
 
 Do not expose the dashboard through a proxy or port forward, and do not share its credential-bearing URL. A process running as the same operating-system user may already be able to read the same local files, so Agent Config Doctor is not a sandbox against a compromised local account.

@@ -2,8 +2,10 @@ import { SCHEMA_VERSION } from "./schema.ts";
 import path from "node:path";
 
 import type { ProviderAdapter, ScanContext } from "./provider-adapter.ts";
+import { describeFindings } from "./rules.ts";
 import type {
   EffectiveConfiguration,
+  EffectiveResource,
   Finding,
   JsonValue,
   PublicResourceRecord,
@@ -23,17 +25,26 @@ export async function scanProvider(
   const effective = normalizeEffective(
     await adapter.resolveEffective(context, discovery.resources, detection),
   );
-  const findings = [
-    ...detectionFindings(detection),
-    ...scopeFindings(
-      await adapter.validate(context, effective.resources),
-      effective.resources,
-    ),
-  ];
+  const findings = describeFindings(
+    [
+      ...detectionFindings(detection),
+      ...scopeFindings(
+        await adapter.validate(context, effective.resources),
+        effective.resources,
+      ),
+    ],
+    effective.resources,
+  );
 
   return {
     detection,
-    effective,
+    effective: {
+      ...effective,
+      resources: effective.resources.map((resource) => ({
+        ...resource,
+        findings: describeFindings(resource.findings, effective.resources),
+      })),
+    },
     findings,
     notices: discovery.notices,
   };
@@ -56,7 +67,7 @@ const defaultLoadModes: Partial<Record<ResourceKind, ResourceLoadMode>> = {
 function normalizeEffective(
   effective: EffectiveConfiguration,
 ): EffectiveConfiguration {
-  const resources = effective.resources.map((resource) => {
+  const resources = dedupeResources(effective.resources).map((resource) => {
     const reach = resource.reach ?? "chain";
     const loadMode = resource.loadMode ?? defaultLoadModes[resource.kind];
     return {
@@ -79,16 +90,66 @@ function normalizeEffective(
       .map((resource) => resource.id),
   );
 
+  const seenOrdered = new Set<string>();
+
   return {
     ...effective,
     resources,
-    orderedResourceIds: effective.orderedResourceIds.filter(
-      (id) => !offChain.has(id),
-    ),
-    decisions: effective.decisions.filter(
+    orderedResourceIds: effective.orderedResourceIds.filter((id) => {
+      if (offChain.has(id) || seenOrdered.has(id)) {
+        return false;
+      }
+      seenOrdered.add(id);
+      return true;
+    }),
+    decisions: dedupeDecisions(effective.decisions).filter(
       (decision) => !offChain.has(decision.resourceId),
     ),
   };
+}
+
+/**
+ * An opaque ID must name exactly one record. The same file can be discovered
+ * twice when a provider home lives inside the scanned repository (once from
+ * the home, once from the repository walk); keep the copy that is in the
+ * ancestor chain, then the active one, then the first seen.
+ */
+function dedupeResources(resources: ResourceRecord[]): ResourceRecord[] {
+  const byId = new Map<string, ResourceRecord>();
+  for (const resource of resources) {
+    const existing = byId.get(resource.id);
+    if (!existing || rank(resource) > rank(existing)) {
+      byId.set(resource.id, resource);
+    }
+  }
+  return resources.filter((resource) => byId.get(resource.id) === resource);
+}
+
+function rank(resource: ResourceRecord): number {
+  return (
+    (resource.reach !== "repository" ? 2 : 0) +
+    (resource.state === "active" ? 1 : 0)
+  );
+}
+
+/**
+ * One decision per resource ID, keeping the adapter's order. When the same ID
+ * was decided twice the active decision wins, otherwise the first seen.
+ */
+function dedupeDecisions(decisions: EffectiveResource[]): EffectiveResource[] {
+  const byId = new Map<string, EffectiveResource>();
+  for (const decision of decisions) {
+    const existing = byId.get(decision.resourceId);
+    if (
+      !existing ||
+      (decision.state === "active" && existing.state !== "active")
+    ) {
+      byId.set(decision.resourceId, decision);
+    }
+  }
+  return decisions.filter(
+    (decision) => byId.get(decision.resourceId) === decision,
+  );
 }
 
 /**

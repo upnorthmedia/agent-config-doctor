@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 
 import type { CoordinatedScan } from "../core/coordinator.ts";
+import { packageVersion } from "../core/version.ts";
 import {
   dashboardClientScript,
   dashboardDocument,
@@ -17,6 +18,7 @@ import {
   type DetectedEditor,
   type SpawnProcess,
 } from "./actions.ts";
+import { readPreview } from "./preview.ts";
 
 const contentSecurityPolicy = [
   "default-src 'none'",
@@ -84,9 +86,11 @@ function publicDashboardOptions(
   editor: DetectedEditor | undefined,
 ) {
   return {
+    version: packageVersion(),
     workingDirectory: state.workingDirectory,
     scannedAt: state.scannedAt,
     actionableResourceIds: state.actions.resourceIds(),
+    previewableResourceIds: state.actions.previewableResourceIds(),
     editor: editor ? { id: editor.id, label: editor.label } : null,
   };
 }
@@ -180,7 +184,7 @@ async function routeRequest(options: {
   const requestUrl = new URL(request.url ?? "/", origin);
   setSecurityHeaders(response);
 
-  if (request.method === "GET" && requestUrl.pathname === "/") {
+  if (request.method === "GET" && isPageRoute(requestUrl.pathname)) {
     sendText(response, 200, "text/html; charset=utf-8", dashboardDocument());
     return;
   }
@@ -260,6 +264,19 @@ async function routeRequest(options: {
     return;
   }
 
+  const previewMatch = requestUrl.pathname.match(
+    /^\/api\/resources\/([A-Za-z0-9_-]+)\/preview$/,
+  );
+  if (request.method === "GET" && previewMatch?.[1]) {
+    try {
+      const target = await state.actions.previewTarget(previewMatch[1]);
+      sendJson(response, 200, await readPreview(target));
+    } catch (error) {
+      sendActionError(response, error);
+    }
+    return;
+  }
+
   if (
     request.method === "POST" &&
     (requestUrl.pathname === "/api/actions/open" ||
@@ -290,6 +307,20 @@ async function routeRequest(options: {
     error: "not_found",
     message: "The requested local dashboard route does not exist.",
   });
+}
+
+/**
+ * Every page is the same document; the client reads the path. Only these
+ * shapes are served so unknown paths stay 404 instead of silently rendering.
+ */
+function isPageRoute(pathname: string): boolean {
+  return (
+    pathname === "/" ||
+    pathname === "/installed" ||
+    pathname === "/effective" ||
+    pathname === "/findings" ||
+    /^\/resources\/[A-Za-z0-9_-]+$/.test(pathname)
+  );
 }
 
 function isAuthorized(request: IncomingMessage, credential: string): boolean {
@@ -340,8 +371,16 @@ function sendActionError(response: ServerResponse, error: unknown): void {
     });
     return;
   }
-  const status = error.code === "resource_not_found" ? 404 : 409;
-  sendJson(response, status, { error: error.code, message: error.message });
+  const statuses: Partial<Record<ActionError["code"], number>> = {
+    resource_not_found: 404,
+    preview_unavailable: 404,
+    preview_too_large: 413,
+    preview_not_text: 415,
+  };
+  sendJson(response, statuses[error.code] ?? 409, {
+    error: error.code,
+    message: error.message,
+  });
 }
 
 function setSecurityHeaders(response: ServerResponse): void {

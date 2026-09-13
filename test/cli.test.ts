@@ -115,6 +115,22 @@ test("prints a concise redacted doctor summary", () => {
   assert.match(result.stderr, /^Error: selected path does not exist\./);
 });
 
+test("--version prints only the package version and exits", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const metadata = JSON.parse(
+    await readFile(new URL("../package.json", import.meta.url), "utf8"),
+  ) as { version: string };
+
+  for (const flag of ["--version", "-v"]) {
+    const result = runCli(flag);
+    assert.equal(result.status, 0, flag);
+    assert.equal(result.stderr, "");
+    assert.equal(result.stdout, `${metadata.version}\n`);
+  }
+  const help = runCli("--help");
+  assert.match(help.stdout, /-v, --version/);
+});
+
 test("writes usage errors only to stderr", () => {
   const result = runCli("scan", path.join(repositoryPath, "missing"), "--json");
 

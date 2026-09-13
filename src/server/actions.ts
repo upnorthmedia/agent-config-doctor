@@ -39,7 +39,11 @@ interface ActionTarget {
   device: bigint;
   inode: bigint;
   roots: ActionRoot[];
+  /** Only file-backed instruction and skill documents can be previewed. */
+  previewable: boolean;
 }
+
+export type PreviewTarget = Pick<ActionTarget, "canonicalPath" | "device" | "inode">;
 
 export interface ActionInventory {
   targets: ReadonlyMap<string, ActionTarget>;
@@ -58,7 +62,11 @@ export class ActionError extends Error {
     | "resource_not_found"
     | "resource_outside_allowed_roots"
     | "resource_replaced"
-    | "launch_failed";
+    | "launch_failed"
+    | "preview_unavailable"
+    | "preview_too_large"
+    | "preview_not_text"
+    | "preview_unreadable";
 
   constructor(
     code:
@@ -67,7 +75,11 @@ export class ActionError extends Error {
       | "resource_not_found"
       | "resource_outside_allowed_roots"
       | "resource_replaced"
-      | "launch_failed",
+      | "launch_failed"
+      | "preview_unavailable"
+      | "preview_too_large"
+      | "preview_not_text"
+      | "preview_unreadable",
     message: string,
   ) {
     super(message);
@@ -192,6 +204,7 @@ export async function createActionInventory(options: {
         device: file.dev,
         inode: file.ino,
         roots: containingRoots,
+        previewable: resource.kind === "instruction" || resource.kind === "skill",
       });
     } catch {
       continue;
@@ -229,6 +242,33 @@ export class LocalActionService {
 
   resourceIds(): string[] {
     return [...this.#inventory.targets.keys()].sort();
+  }
+
+  previewableResourceIds(): string[] {
+    return [...this.#inventory.targets.values()]
+      .filter((target) => target.previewable)
+      .map((target) => target.id)
+      .sort();
+  }
+
+  /**
+   * Revalidates the resource exactly like an open or reveal action and returns
+   * the recorded canonical target for a bounded preview read. Configuration
+   * files are never previewed; they keep their structured, redacted metadata.
+   */
+  async previewTarget(resourceId: string): Promise<PreviewTarget> {
+    const target = await this.#validate(resourceId);
+    if (!target.previewable) {
+      throw new ActionError(
+        "preview_unavailable",
+        "Only file-backed instruction and skill documents can be previewed.",
+      );
+    }
+    return {
+      canonicalPath: target.canonicalPath,
+      device: target.device,
+      inode: target.inode,
+    };
   }
 
   async open(resourceId: string): Promise<void> {
