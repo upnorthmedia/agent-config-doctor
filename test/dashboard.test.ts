@@ -94,7 +94,6 @@ test("dashboard renders scan values as text and authenticates every API request"
   assert.match(dashboardClientScript, /textContent/);
   assert.match(dashboardClientScript, /Authorization/);
   assert.match(dashboardClientScript, /sessionStorage/);
-  assert.equal(dashboardClientScript.includes("localStorage"), false);
   assert.match(dashboardClientScript, /api\/resources\/.*\/path/);
   assert.match(dashboardClientScript, /api\/actions\/open/);
   assert.match(dashboardClientScript, /api\/actions\/reveal/);

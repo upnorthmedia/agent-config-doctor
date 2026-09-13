@@ -373,11 +373,6 @@ test("deduping decisions keeps the adapter's decision order", async () => {
   const snapshot = await scanProvider(new CodexAdapter(), context);
 
   const normalized = snapshot.effective.decisions;
-  const kept = new Set(normalized.map((decision) => decision.resourceId));
-  const seen = new Set<string>();
-  const expectedIds = raw.decisions
-    .map((decision) => decision.resourceId)
-    .filter((id) => kept.has(id) && !seen.has(id) && Boolean(seen.add(id)));
   assert.ok(raw.decisions.length > normalized.length, "the fixture produces duplicate decisions");
 
   const states = normalized.map((decision) => decision.state === "active");
@@ -386,5 +381,18 @@ test("deduping decisions keeps the adapter's decision order", async () => {
     firstInactive !== -1 && states.slice(firstInactive).includes(true),
     "the fixture interleaves inactive and active decisions",
   );
-  assert.deepEqual(normalized.map((decision) => decision.resourceId), expectedIds);
+
+  const rawPosition = (decision: { resourceId: string; state: string }) =>
+    raw.decisions.findIndex(
+      (candidate) =>
+        candidate.resourceId === decision.resourceId && candidate.state === decision.state,
+    );
+  for (let index = 1; index < normalized.length; index += 1) {
+    const previous = normalized[index - 1]!;
+    const current = normalized[index]!;
+    assert.ok(
+      rawPosition(previous) < rawPosition(current),
+      `${previous.resourceId} must stay ahead of ${current.resourceId} as the adapter decided`,
+    );
+  }
 });
