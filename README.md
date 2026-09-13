@@ -45,7 +45,7 @@ npx agent-config-doctor [path] [--no-open] [--editor <name>]
 npx agent-config-doctor --version
 ```
 
-`path` defaults to the current working directory and is the only working directory the dashboard scans. `--version` prints the package version and exits. To inspect a different directory, launch Agent Config Doctor again with that path.
+`path` defaults to the current working directory and is the only working directory the dashboard scans. `--version` (or `-v`) prints the package version and exits; the dashboard header shows the same version. To inspect a different directory, launch Agent Config Doctor again with that path.
 
 Each dashboard page answers one question and has its own URL, so reload restores the page and the browser's Back button returns to the previous one:
 
